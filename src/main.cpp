@@ -22,7 +22,9 @@ static constexpr int TILE = 24;
 
 static constexpr int START_HP = 100;
 static constexpr int START_ENERGY = 100;
+
 static constexpr int ENERGY_REGEN_PER_SECOND = 5;
+
 static constexpr int MAX_BUGS = 8;
 
 static constexpr double MOVE_COOLDOWN = 0.12;
@@ -91,7 +93,10 @@ static mt19937 rng(
 // RANDOM
 // ============================================================
 
-static int randomInt(int minValue, int maxValue) {
+static int randomInt(
+    int minValue,
+    int maxValue
+) {
     uniform_int_distribution<int> distribution(
         minValue,
         maxValue
@@ -113,14 +118,20 @@ static double randomDouble(
 }
 
 // ============================================================
-// MAP
+// MAP HELPERS
 // ============================================================
 
-static int indexOf(int x, int y) {
+static int indexOf(
+    int x,
+    int y
+) {
     return y * MAP_W + x;
 }
 
-static bool insideMap(int x, int y) {
+static bool insideMap(
+    int x,
+    int y
+) {
     return
         x >= 0 &&
         x < MAP_W &&
@@ -132,228 +143,266 @@ static bool insideMap(int x, int y) {
 // JAVASCRIPT SETUP
 // ============================================================
 
-EM_JS(void, js_setup, (), {
+EM_JS(
+    void,
+    js_setup,
+    (),
+    {
+        window.pixelMiner =
+            window.pixelMiner || {};
 
-    window.pixelMiner =
-        window.pixelMiner || {};
+        const canvas =
+            document.getElementById("gameCanvas") ||
+            document.querySelector("canvas");
 
-    const canvas =
-        document.getElementById("gameCanvas") ||
-        document.querySelector("canvas");
+        if (!canvas) {
+            return;
+        }
 
-    if (!canvas) {
-        return;
-    }
+        window.pixelMiner.canvas =
+            canvas;
 
-    window.pixelMiner.canvas =
-        canvas;
+        window.pixelMiner.ctx =
+            canvas.getContext("2d");
 
-    window.pixelMiner.ctx =
-        canvas.getContext("2d");
+        window.pixelMiner.keys = {};
 
-    window.pixelMiner.keys = {};
+        window.pixelMiner.mouseDown =
+            false;
 
-    window.pixelMiner.mouseDown =
-        false;
+        window.pixelMiner.mouseX = 0;
+        window.pixelMiner.mouseY = 0;
 
-    window.pixelMiner.mouseX = 0;
-    window.pixelMiner.mouseY = 0;
+        canvas.tabIndex = 0;
 
-    canvas.tabIndex = 0;
+        canvas.focus();
 
-    canvas.focus();
+        canvas.addEventListener(
+            "keydown",
+            function(event) {
 
-    canvas.addEventListener(
-        "keydown",
-        function(event) {
+                window.pixelMiner.keys[
+                    event.key
+                ] = true;
 
-            window.pixelMiner.keys[
-                event.key
-            ] = true;
+                if (
+                    event.key === "ArrowUp" ||
+                    event.key === "ArrowDown" ||
+                    event.key === "ArrowLeft" ||
+                    event.key === "ArrowRight" ||
+                    event.key === " "
+                ) {
+                    event.preventDefault();
+                }
+            }
+        );
 
-            if (
-                event.key === "ArrowUp" ||
-                event.key === "ArrowDown" ||
-                event.key === "ArrowLeft" ||
-                event.key === "ArrowRight" ||
-                event.key === " "
-            ) {
+        canvas.addEventListener(
+            "keyup",
+            function(event) {
+
+                window.pixelMiner.keys[
+                    event.key
+                ] = false;
+            }
+        );
+
+        canvas.addEventListener(
+            "mousedown",
+            function(event) {
+
+                const rect =
+                    canvas.getBoundingClientRect();
+
+                window.pixelMiner.mouseX =
+                    (event.clientX - rect.left) *
+                    canvas.width /
+                    rect.width;
+
+                window.pixelMiner.mouseY =
+                    (event.clientY - rect.top) *
+                    canvas.height /
+                    rect.height;
+
+                window.pixelMiner.mouseDown =
+                    true;
+            }
+        );
+
+        window.addEventListener(
+            "mouseup",
+            function() {
+
+                window.pixelMiner.mouseDown =
+                    false;
+            }
+        );
+
+        canvas.addEventListener(
+            "touchstart",
+            function(event) {
+
+                const touch =
+                    event.touches[0];
+
+                if (!touch) {
+                    return;
+                }
+
+                const rect =
+                    canvas.getBoundingClientRect();
+
+                window.pixelMiner.mouseX =
+                    (touch.clientX - rect.left) *
+                    canvas.width /
+                    rect.width;
+
+                window.pixelMiner.mouseY =
+                    (touch.clientY - rect.top) *
+                    canvas.height /
+                    rect.height;
+
+                window.pixelMiner.mouseDown =
+                    true;
+
                 event.preventDefault();
-            }
-        }
-    );
+            },
+            { passive: false }
+        );
 
-    canvas.addEventListener(
-        "keyup",
-        function(event) {
+        canvas.addEventListener(
+            "touchend",
+            function(event) {
 
-            window.pixelMiner.keys[
-                event.key
-            ] = false;
-        }
-    );
+                window.pixelMiner.mouseDown =
+                    false;
 
-    canvas.addEventListener(
-        "mousedown",
-        function(event) {
+                event.preventDefault();
+            },
+            { passive: false }
+        );
 
-            const rect =
-                canvas.getBoundingClientRect();
+        // Allow popup restart to call the exported function.
+        window.pixelMiner.restart =
+            function() {
 
-            window.pixelMiner.mouseX =
-                (event.clientX - rect.left) *
-                canvas.width /
-                rect.width;
+                if (
+                    window.Module &&
+                    typeof window.Module._restart_game ===
+                    "function"
+                ) {
 
-            window.pixelMiner.mouseY =
-                (event.clientY - rect.top) *
-                canvas.height /
-                rect.height;
+                    window.Module._restart_game();
 
-            window.pixelMiner.mouseDown =
-                true;
-        }
-    );
+                } else {
 
-    window.addEventListener(
-        "mouseup",
-        function() {
-
-            window.pixelMiner.mouseDown =
-                false;
-        }
-    );
-
-    canvas.addEventListener(
-        "touchstart",
-        function(event) {
-
-            const touch =
-                event.touches[0];
-
-            if (!touch) {
-                return;
-            }
-
-            const rect =
-                canvas.getBoundingClientRect();
-
-            window.pixelMiner.mouseX =
-                (touch.clientX - rect.left) *
-                canvas.width /
-                rect.width;
-
-            window.pixelMiner.mouseY =
-                (touch.clientY - rect.top) *
-                canvas.height /
-                rect.height;
-
-            window.pixelMiner.mouseDown =
-                true;
-
-            event.preventDefault();
-        },
-        { passive: false }
-    );
-
-    canvas.addEventListener(
-        "touchend",
-        function(event) {
-
-            window.pixelMiner.mouseDown =
-                false;
-
-            event.preventDefault();
-        },
-        { passive: false }
-    );
-});
+                    window.location.reload();
+                }
+            };
+    }
+);
 
 // ============================================================
 // KEY INPUT
 // ============================================================
 
-EM_JS(int, js_key, (int key), {
+EM_JS(
+    int,
+    js_key,
+    (int key),
+    {
+        if (
+            !window.pixelMiner ||
+            !window.pixelMiner.keys
+        ) {
+            return 0;
+        }
 
-    if (
-        !window.pixelMiner ||
-        !window.pixelMiner.keys
-    ) {
+        if (key === 0) {
+
+            return (
+                window.pixelMiner.keys["ArrowUp"] ||
+                window.pixelMiner.keys["w"] ||
+                window.pixelMiner.keys["W"]
+            ) ? 1 : 0;
+        }
+
+        if (key === 1) {
+
+            return (
+                window.pixelMiner.keys["ArrowDown"] ||
+                window.pixelMiner.keys["s"] ||
+                window.pixelMiner.keys["S"]
+            ) ? 1 : 0;
+        }
+
+        if (key === 2) {
+
+            return (
+                window.pixelMiner.keys["ArrowLeft"] ||
+                window.pixelMiner.keys["a"] ||
+                window.pixelMiner.keys["A"]
+            ) ? 1 : 0;
+        }
+
+        if (key === 3) {
+
+            return (
+                window.pixelMiner.keys["ArrowRight"] ||
+                window.pixelMiner.keys["d"] ||
+                window.pixelMiner.keys["D"]
+            ) ? 1 : 0;
+        }
+
         return 0;
     }
-
-    if (key === 0) {
-
-        return (
-            window.pixelMiner.keys["ArrowUp"] ||
-            window.pixelMiner.keys["w"] ||
-            window.pixelMiner.keys["W"]
-        ) ? 1 : 0;
-    }
-
-    if (key === 1) {
-
-        return (
-            window.pixelMiner.keys["ArrowDown"] ||
-            window.pixelMiner.keys["s"] ||
-            window.pixelMiner.keys["S"]
-        ) ? 1 : 0;
-    }
-
-    if (key === 2) {
-
-        return (
-            window.pixelMiner.keys["ArrowLeft"] ||
-            window.pixelMiner.keys["a"] ||
-            window.pixelMiner.keys["A"]
-        ) ? 1 : 0;
-    }
-
-    if (key === 3) {
-
-        return (
-            window.pixelMiner.keys["ArrowRight"] ||
-            window.pixelMiner.keys["d"] ||
-            window.pixelMiner.keys["D"]
-        ) ? 1 : 0;
-    }
-
-    return 0;
-});
+);
 
 // ============================================================
 // MOUSE INPUT
 // ============================================================
 
-EM_JS(int, js_mouse_down, (), {
+EM_JS(
+    int,
+    js_mouse_down,
+    (),
+    {
+        if (
+            window.pixelMiner &&
+            window.pixelMiner.mouseDown
+        ) {
+            return 1;
+        }
 
-    if (
-        window.pixelMiner &&
-        window.pixelMiner.mouseDown
-    ) {
-        return 1;
+        return 0;
     }
+);
 
-    return 0;
-});
+EM_JS(
+    int,
+    js_mouse_x,
+    (),
+    {
+        if (window.pixelMiner) {
+            return window.pixelMiner.mouseX;
+        }
 
-EM_JS(int, js_mouse_x, (), {
-
-    if (window.pixelMiner) {
-        return window.pixelMiner.mouseX;
+        return 0;
     }
+);
 
-    return 0;
-});
+EM_JS(
+    int,
+    js_mouse_y,
+    (),
+    {
+        if (window.pixelMiner) {
+            return window.pixelMiner.mouseY;
+        }
 
-EM_JS(int, js_mouse_y, (), {
-
-    if (window.pixelMiner) {
-        return window.pixelMiner.mouseY;
+        return 0;
     }
-
-    return 0;
-});
+);
 
 // ============================================================
 // HUD
@@ -372,9 +421,10 @@ EM_JS(
         int depth
     ),
     {
-
-        function setText(id, value) {
-
+        function setText(
+            id,
+            value
+        ) {
             const element =
                 document.getElementById(id);
 
@@ -402,17 +452,28 @@ EM_JS(
 
         if (status) {
 
-            status.textContent =
-                hp <= 0 ||
-                energy <= 0
-                    ? "GAME OVER"
-                    : "MINING";
+            if (hp <= 0) {
+                status.textContent =
+                    "GAME OVER";
+
+            } else if (paused) {
+                status.textContent =
+                    "PAUSED";
+
+            } else if (energy <= 0) {
+                status.textContent =
+                    "RECHARGING";
+
+            } else {
+                status.textContent =
+                    "MINING";
+            }
         }
     }
 );
 
 // ============================================================
-// MESSAGE
+// NORMAL MESSAGE
 // ============================================================
 
 EM_JS(
@@ -420,7 +481,6 @@ EM_JS(
     js_message,
     (const char* messagePtr),
     {
-
         const message =
             UTF8ToString(
                 messagePtr
@@ -439,6 +499,212 @@ EM_JS(
 );
 
 // ============================================================
+// GAME OVER POPUP
+// ============================================================
+
+EM_JS(
+    void,
+    js_show_game_over,
+    (),
+    {
+        let popup =
+            document.getElementById(
+                "pixelMinerGameOver"
+            );
+
+        if (!popup) {
+
+            popup =
+                document.createElement(
+                    "div"
+                );
+
+            popup.id =
+                "pixelMinerGameOver";
+
+            popup.style.position =
+                "fixed";
+
+            popup.style.inset =
+                "0";
+
+            popup.style.display =
+                "flex";
+
+            popup.style.alignItems =
+                "center";
+
+            popup.style.justifyContent =
+                "center";
+
+            popup.style.background =
+                "rgba(0,0,0,0.72)";
+
+            popup.style.zIndex =
+                "999999";
+
+            popup.style.fontFamily =
+                "system-ui, sans-serif";
+
+            const box =
+                document.createElement(
+                    "div"
+                );
+
+            box.id =
+                "pixelMinerGameOverBox";
+
+            box.style.width =
+                "min(380px, 86vw)";
+
+            box.style.padding =
+                "28px";
+
+            box.style.borderRadius =
+                "18px";
+
+            box.style.background =
+                "#0b151d";
+
+            box.style.border =
+                "1px solid rgba(120,220,255,0.28)";
+
+            box.style.boxShadow =
+                "0 20px 70px rgba(0,0,0,0.55)";
+
+            box.style.textAlign =
+                "center";
+
+            const title =
+                document.createElement(
+                    "div"
+                );
+
+            title.textContent =
+                "GAME OVER";
+
+            title.style.fontSize =
+                "32px";
+
+            title.style.fontWeight =
+                "800";
+
+            title.style.color =
+                "#ffffff";
+
+            title.style.marginBottom =
+                "10px";
+
+            const subtitle =
+                document.createElement(
+                    "div"
+                );
+
+            subtitle.textContent =
+                "Your mining run has ended.";
+
+            subtitle.style.fontSize =
+                "15px";
+
+            subtitle.style.color =
+                "#a9c4cf";
+
+            subtitle.style.marginBottom =
+                "22px";
+
+            const restart =
+                document.createElement(
+                    "button"
+                );
+
+            restart.type =
+                "button";
+
+            restart.textContent =
+                "RESTART";
+
+            restart.style.width =
+                "100%";
+
+            restart.style.padding =
+                "13px 18px";
+
+            restart.style.border =
+                "0";
+
+            restart.style.borderRadius =
+                "10px";
+
+            restart.style.cursor =
+                "pointer";
+
+            restart.style.fontSize =
+                "15px";
+
+            restart.style.fontWeight =
+                "800";
+
+            restart.style.background =
+                "#5ff6ff";
+
+            restart.style.color =
+                "#031016";
+
+            restart.onclick =
+                function() {
+
+                    if (
+                        window.pixelMiner &&
+                        typeof window.pixelMiner.restart ===
+                        "function"
+                    ) {
+
+                        window.pixelMiner.restart();
+
+                    } else {
+
+                        window.location.reload();
+                    }
+                };
+
+            box.appendChild(title);
+            box.appendChild(subtitle);
+            box.appendChild(restart);
+
+            popup.appendChild(box);
+
+            document.body.appendChild(
+                popup
+            );
+        }
+
+        popup.style.display =
+            "flex";
+    }
+);
+
+// ============================================================
+// HIDE GAME OVER POPUP
+// ============================================================
+
+EM_JS(
+    void,
+    js_hide_game_over,
+    (),
+    {
+        const popup =
+            document.getElementById(
+                "pixelMinerGameOver"
+            );
+
+        if (popup) {
+            popup.style.display =
+                "none";
+        }
+    }
+);
+
+// ============================================================
 // SAVE BEST
 // ============================================================
 
@@ -447,7 +713,6 @@ EM_JS(
     js_save_best,
     (int score),
     {
-
         try {
 
             localStorage.setItem(
@@ -468,7 +733,6 @@ EM_JS(
     js_load_best,
     (),
     {
-
         try {
 
             const value =
@@ -519,7 +783,6 @@ EM_JS(
         int depth
     ),
     {
-
         if (
             !window.pixelMiner ||
             !window.pixelMiner.ctx ||
@@ -755,7 +1018,6 @@ EM_JS(
                     tile - 1
                 );
 
-                // Rock
                 if (type === 1) {
 
                     ctx.fillStyle =
@@ -776,7 +1038,6 @@ EM_JS(
                     );
                 }
 
-                // Copper
                 if (type === 2) {
 
                     ctx.fillStyle =
@@ -790,7 +1051,6 @@ EM_JS(
                     );
                 }
 
-                // Crystal
                 if (type === 3) {
 
                     ctx.fillStyle =
@@ -823,7 +1083,6 @@ EM_JS(
                     ctx.fill();
                 }
 
-                // Energy
                 if (type === 4) {
 
                     ctx.fillStyle =
@@ -842,7 +1101,6 @@ EM_JS(
                     ctx.fill();
                 }
 
-                // Exit
                 if (type === 5) {
 
                     ctx.strokeStyle =
@@ -878,7 +1136,6 @@ EM_JS(
                     );
                 }
 
-                // Hazard
                 if (type === 6) {
 
                     ctx.fillStyle =
@@ -1023,7 +1280,10 @@ EM_JS(
 
         ctx.restore();
 
-        // Depth label
+        // ----------------------------------------------------
+        // DEPTH HUD
+        // ----------------------------------------------------
+
         ctx.fillStyle =
             "rgba(0,0,0,0.55)";
 
@@ -1136,7 +1396,6 @@ static void generateWorld() {
     const int startY =
         MAP_H / 2;
 
-    // Safe starting area
     for (
         int dy = -2;
         dy <= 2;
@@ -1156,14 +1415,20 @@ static void generateWorld() {
                 startY + dy;
 
             if (
-                !insideMap(x, y)
+                !insideMap(
+                    x,
+                    y
+                )
             ) {
                 continue;
             }
 
             Tile& tile =
                 world[
-                    indexOf(x, y)
+                    indexOf(
+                        x,
+                        y
+                    )
                 ];
 
             tile.type = 0;
@@ -1171,7 +1436,6 @@ static void generateWorld() {
         }
     }
 
-    // Exit
     int exitX = 0;
     int exitY = 0;
 
@@ -1209,7 +1473,6 @@ static void generateWorld() {
         )
     ].revealed = 1;
 
-    // Hazards
     const int hazardCount =
         min(
             10,
@@ -1309,7 +1572,7 @@ static void revealAround(
 }
 
 // ============================================================
-// MINING / COLLECTION
+// MINE / COLLECT
 // ============================================================
 
 static void mineTile(
@@ -1399,6 +1662,18 @@ static void mineTile(
 
         player.score += 3;
     }
+
+    player.energy =
+        max(
+            0,
+            player.energy
+        );
+
+    player.hp =
+        max(
+            0,
+            player.hp
+        );
 }
 
 // ============================================================
@@ -1410,14 +1685,23 @@ static void tryMove(
     int dy
 ) {
 
-   T OF ENERGY"
-        );
-if (
-    player.energy <= 0
-) {
-    player.energy = 0;
-    return;
-}
+    if (
+        gameOver ||
+        paused
+    ) {
+        return;
+    }
+
+    // Energy at zero does NOT cause game over.
+    // Player simply waits for automatic regeneration.
+    if (
+        player.energy <= 0
+    ) {
+
+        player.energy = 0;
+
+        return;
+    }
 
     const int nextX =
         player.x + dx;
@@ -1442,7 +1726,6 @@ if (
             )
         ];
 
-    // Mine rock
     if (
         target.type == 1
     ) {
@@ -1457,10 +1740,24 @@ if (
             player.y
         );
 
+        if (
+            player.hp <= 0
+        ) {
+
+            player.hp = 0;
+
+            gameOver = true;
+
+            js_message(
+                "GAME OVER"
+            );
+
+            js_show_game_over();
+        }
+
         return;
     }
 
-    // Move
     player.x = nextX;
     player.y = nextY;
 
@@ -1471,7 +1768,6 @@ if (
         player.y
     );
 
-    // Collect
     if (
         target.type == 2 ||
         target.type == 3 ||
@@ -1485,7 +1781,6 @@ if (
         );
     }
 
-    // Exit
     if (
         target.type == 5
     ) {
@@ -1528,28 +1823,32 @@ if (
         );
     }
 
+    player.energy =
+        max(
+            0,
+            player.energy
+        );
+
+    player.hp =
+        max(
+            0,
+            player.hp
+        );
+
+    // HP reaching zero causes Game Over.
     if (
-        player.energy <= 0 ||
         player.hp <= 0
     ) {
 
-        player.energy =
-            max(
-                0,
-                player.energy
-            );
-
-        player.hp =
-            max(
-                0,
-                player.hp
-            );
+        player.hp = 0;
 
         gameOver = true;
 
         js_message(
-            "RUN OVER"
+            "GAME OVER"
         );
+
+        js_show_game_over();
     }
 }
 
@@ -1724,6 +2023,12 @@ static void updateBugs(
                     )
                 );
 
+            player.hp =
+                max(
+                    0,
+                    player.hp
+                );
+
             if (
                 player.hp <= 0
             ) {
@@ -1733,9 +2038,76 @@ static void updateBugs(
                 gameOver = true;
 
                 js_message(
-                    "CAUGHT BY A CAVE CRAWLER"
+                    "GAME OVER"
                 );
+
+                js_show_game_over();
+
+                return;
             }
+        }
+    }
+}
+
+// ============================================================
+// ENERGY REGENERATION
+// ============================================================
+
+static void updateEnergy(
+    double currentTime
+) {
+
+    if (
+        gameOver ||
+        paused
+    ) {
+        return;
+    }
+
+    if (
+        player.energy >= START_ENERGY
+    ) {
+
+        player.energy =
+            START_ENERGY;
+
+        lastEnergyRegen =
+            currentTime;
+
+        return;
+    }
+
+    if (
+        currentTime -
+        lastEnergyRegen >=
+        1.0
+    ) {
+
+        const double elapsed =
+            currentTime -
+            lastEnergyRegen;
+
+        const int seconds =
+            static_cast<int>(
+                elapsed
+            );
+
+        if (
+            seconds > 0
+        ) {
+
+            player.energy =
+                min(
+                    START_ENERGY,
+                    player.energy +
+                    seconds *
+                    ENERGY_REGEN_PER_SECOND
+                );
+
+            lastEnergyRegen +=
+                static_cast<double>(
+                    seconds
+                );
         }
     }
 }
@@ -1802,68 +2174,68 @@ static void handleMouse() {
     const int mouseY =
         js_mouse_y();
 
-    const int targetX =
-        mouseX / TILE;
+    // Mouse coordinates are canvas/screen coordinates.
+    // Convert them to the nearest adjacent direction
+    // around the player rather than treating them as world
+    // coordinates.
 
-    const int targetY =
-        mouseY / TILE;
+    const int canvasCenterX =
+        MAP_W * TILE / 2;
 
-    if (
-        !insideMap(
-            targetX,
-            targetY
-        )
-    ) {
-        return;
-    }
+    const int canvasCenterY =
+        MAP_H * TILE / 2;
 
-    const int dx =
-        targetX -
-        player.x;
+    const int relativeX =
+        mouseX - canvasCenterX;
 
-    const int dy =
-        targetY -
-        player.y;
+    const int relativeY =
+        mouseY - canvasCenterY;
 
     if (
-        abs(dx) +
-        abs(dy) != 1
+        abs(relativeX) >
+        abs(relativeY)
     ) {
-        return;
-    }
 
-    if (dx > 0) {
+        if (
+            relativeX > 0
+        ) {
 
-        tryMove(
-            1,
-            0
-        );
+            tryMove(
+                1,
+                0
+            );
 
-    } else if (dx < 0) {
+        } else {
 
-        tryMove(
-            -1,
-            0
-        );
-
-    } else if (dy > 0) {
-
-        tryMove(
-            0,
-            1
-        );
+            tryMove(
+                -1,
+                0
+            );
+        }
 
     } else {
 
-        tryMove(
-            0,
-            -1
-        );
+        if (
+            relativeY > 0
+        ) {
+
+            tryMove(
+                0,
+                1
+            );
+
+        } else {
+
+            tryMove(
+                0,
+                -1
+            );
+        }
     }
 }
 
 // ============================================================
-// RENDER GAME
+// RENDER
 // ============================================================
 
 static void renderGame() {
@@ -1923,7 +2295,7 @@ static void updateHUD() {
 }
 
 // ============================================================
-// EXPORTED MOVE FUNCTION
+// EXPORTED MOVE
 // ============================================================
 
 extern "C"
@@ -1947,7 +2319,7 @@ void move_player(
 }
 
 // ============================================================
-// EXPORTED PAUSE FUNCTION
+// EXPORTED PAUSE
 // ============================================================
 
 extern "C"
@@ -2010,10 +2382,10 @@ void restart_game() {
 
     lastMoveTime = 0.0;
     lastBugSpawn = 0.0;
-if (
-    !gameOver &&
-    !paused
-) {
+
+    lastEnergyRegen =
+        emscripten_get_now() /
+        1000.0;
 
     generateWorld();
 
@@ -2021,6 +2393,8 @@ if (
         player.x,
         player.y
     );
+
+    js_hide_game_over();
 
     js_message(
         "MINING"
@@ -2070,6 +2444,18 @@ static void gameLoop(
         !paused
     ) {
 
+        // --------------------------------------------
+        // ENERGY REGEN
+        // --------------------------------------------
+
+        updateEnergy(
+            currentTime
+        );
+
+        // --------------------------------------------
+        // PLAYER INPUT
+        // --------------------------------------------
+
         if (
             currentTime -
             lastMoveTime >=
@@ -2077,23 +2463,16 @@ static void gameLoop(
         ) {
 
             handleKeyboard();
-if (
-    player.energy < START_ENERGY &&
-    currentTime - lastEnergyRegen >= 1.0
-) {
-    player.energy = min(
-        START_ENERGY,
-        player.energy + ENERGY_REGEN_PER_SECOND
-    );
-
-    lastEnergyRegen = currentTime;
-}
 
             handleMouse();
 
             lastMoveTime =
                 currentTime;
         }
+
+        // --------------------------------------------
+        // BUG SPAWN
+        // --------------------------------------------
 
         const double spawnInterval =
             max(
@@ -2114,9 +2493,17 @@ if (
                 currentTime;
         }
 
+        // --------------------------------------------
+        // BUG UPDATE
+        // --------------------------------------------
+
         updateBugs(
             deltaTime
         );
+
+        // --------------------------------------------
+        // BEST SCORE
+        // --------------------------------------------
 
         if (
             player.score >
@@ -2171,12 +2558,18 @@ int main() {
     gameOver = false;
     paused = false;
 
+    lastEnergyRegen =
+        emscripten_get_now() /
+        1000.0;
+
     generateWorld();
 
     revealAround(
         player.x,
         player.y
     );
+
+    js_hide_game_over();
 
     js_message(
         "MINING"
