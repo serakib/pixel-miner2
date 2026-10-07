@@ -29,7 +29,6 @@ static constexpr double MOVE_COOLDOWN = 0.12;
 // ============================================================
 // TILE TYPES
 // ============================================================
-//
 // 0 = dirt
 // 1 = rock
 // 2 = copper
@@ -87,7 +86,7 @@ static mt19937 rng(
 );
 
 // ============================================================
-// RANDOM HELPERS
+// RANDOM
 // ============================================================
 
 static int randomInt(int minValue, int maxValue) {
@@ -112,7 +111,7 @@ static double randomDouble(
 }
 
 // ============================================================
-// MAP HELPERS
+// MAP
 // ============================================================
 
 static int indexOf(int x, int y) {
@@ -128,10 +127,11 @@ static bool insideMap(int x, int y) {
 }
 
 // ============================================================
-// JAVASCRIPT BRIDGE
+// JAVASCRIPT SETUP
 // ============================================================
 
 EM_JS(void, js_setup, (), {
+
     window.pixelMiner =
         window.pixelMiner || {};
 
@@ -143,14 +143,17 @@ EM_JS(void, js_setup, (), {
         return;
     }
 
-    window.pixelMiner.canvas = canvas;
+    window.pixelMiner.canvas =
+        canvas;
 
     window.pixelMiner.ctx =
         canvas.getContext("2d");
 
     window.pixelMiner.keys = {};
 
-    window.pixelMiner.mouseDown = false;
+    window.pixelMiner.mouseDown =
+        false;
+
     window.pixelMiner.mouseX = 0;
     window.pixelMiner.mouseY = 0;
 
@@ -160,7 +163,7 @@ EM_JS(void, js_setup, (), {
 
     canvas.addEventListener(
         "keydown",
-        function (event) {
+        function(event) {
 
             window.pixelMiner.keys[
                 event.key
@@ -180,7 +183,7 @@ EM_JS(void, js_setup, (), {
 
     canvas.addEventListener(
         "keyup",
-        function (event) {
+        function(event) {
 
             window.pixelMiner.keys[
                 event.key
@@ -190,7 +193,7 @@ EM_JS(void, js_setup, (), {
 
     canvas.addEventListener(
         "mousedown",
-        function (event) {
+        function(event) {
 
             const rect =
                 canvas.getBoundingClientRect();
@@ -205,20 +208,23 @@ EM_JS(void, js_setup, (), {
                 canvas.height /
                 rect.height;
 
-            window.pixelMiner.mouseDown = true;
+            window.pixelMiner.mouseDown =
+                true;
         }
     );
 
     window.addEventListener(
         "mouseup",
-        function () {
-            window.pixelMiner.mouseDown = false;
+        function() {
+
+            window.pixelMiner.mouseDown =
+                false;
         }
     );
 
     canvas.addEventListener(
         "touchstart",
-        function (event) {
+        function(event) {
 
             const touch =
                 event.touches[0];
@@ -240,7 +246,8 @@ EM_JS(void, js_setup, (), {
                 canvas.height /
                 rect.height;
 
-            window.pixelMiner.mouseDown = true;
+            window.pixelMiner.mouseDown =
+                true;
 
             event.preventDefault();
         },
@@ -249,15 +256,20 @@ EM_JS(void, js_setup, (), {
 
     canvas.addEventListener(
         "touchend",
-        function (event) {
+        function(event) {
 
-            window.pixelMiner.mouseDown = false;
+            window.pixelMiner.mouseDown =
+                false;
 
             event.preventDefault();
         },
         { passive: false }
     );
 });
+
+// ============================================================
+// KEY INPUT
+// ============================================================
 
 EM_JS(int, js_key, (int key), {
 
@@ -306,6 +318,10 @@ EM_JS(int, js_key, (int key), {
 
     return 0;
 });
+
+// ============================================================
+// MOUSE INPUT
+// ============================================================
 
 EM_JS(int, js_mouse_down, (), {
 
@@ -366,40 +382,13 @@ EM_JS(
             }
         }
 
-        setText(
-            "score",
-            score
-        );
-
-        setText(
-            "bestScore",
-            best
-        );
-
-        setText(
-            "hp",
-            hp
-        );
-
-        setText(
-            "energy",
-            energy
-        );
-
-        setText(
-            "copper",
-            copper
-        );
-
-        setText(
-            "crystals",
-            crystals
-        );
-
-        setText(
-            "depth",
-            depth
-        );
+        setText("score", score);
+        setText("bestScore", best);
+        setText("hp", hp);
+        setText("energy", energy);
+        setText("copper", copper);
+        setText("crystals", crystals);
+        setText("depth", depth);
 
         const status =
             document.getElementById(
@@ -448,7 +437,7 @@ EM_JS(
 );
 
 // ============================================================
-// LOCAL STORAGE
+// SAVE BEST
 // ============================================================
 
 EM_JS(
@@ -467,6 +456,10 @@ EM_JS(
         } catch (error) {}
     }
 );
+
+// ============================================================
+// LOAD BEST
+// ============================================================
 
 EM_JS(
     int,
@@ -507,11 +500,6 @@ EM_JS(
 
 // ============================================================
 // RENDER
-// ============================================================
-//
-// IMPORTANT:
-// Renderer is intentionally kept here as valid EM_JS.
-// There is no extra ", 0" after the JS body.
 // ============================================================
 
 EM_JS(
@@ -765,7 +753,7 @@ EM_JS(
                     tile - 1
                 );
 
-                // Rock detail
+                // Rock
                 if (type === 1) {
 
                     ctx.fillStyle =
@@ -1033,10 +1021,7 @@ EM_JS(
 
         ctx.restore();
 
-        // ----------------------------------------------------
-        // DEPTH
-        // ----------------------------------------------------
-
+        // Depth label
         ctx.fillStyle =
             "rgba(0,0,0,0.55)";
 
@@ -1109,8 +1094,7 @@ static void generateWorld() {
                 );
 
             if (
-                roll <
-                rockChance
+                roll < rockChance
             ) {
 
                 tile.type = 1;
@@ -1150,7 +1134,7 @@ static void generateWorld() {
     const int startY =
         MAP_H / 2;
 
-    // Safe starting zone
+    // Safe starting area
     for (
         int dy = -2;
         dy <= 2;
@@ -1185,7 +1169,7 @@ static void generateWorld() {
         }
     }
 
-    // Place exit
+    // Exit
     int exitX = 0;
     int exitY = 0;
 
@@ -1210,11 +1194,17 @@ static void generateWorld() {
     );
 
     world[
-        indexOf(exitX, exitY)
+        indexOf(
+            exitX,
+            exitY
+        )
     ].type = 5;
 
     world[
-        indexOf(exitX, exitY)
+        indexOf(
+            exitX,
+            exitY
+        )
     ].revealed = 1;
 
     // Hazards
@@ -1306,7 +1296,10 @@ static void revealAround(
             ) {
 
                 world[
-                    indexOf(x, y)
+                    indexOf(
+                        x,
+                        y
+                    )
                 ].revealed = 1;
             }
         }
@@ -1314,7 +1307,7 @@ static void revealAround(
 }
 
 // ============================================================
-// MINE / COLLECT
+// MINING / COLLECTION
 // ============================================================
 
 static void mineTile(
@@ -1330,7 +1323,10 @@ static void mineTile(
 
     Tile& tile =
         world[
-            indexOf(x, y)
+            indexOf(
+                x,
+                y
+            )
         ];
 
     tile.revealed = 1;
@@ -1457,7 +1453,7 @@ static void tryMove(
             )
         ];
 
-    // Rock gets mined instead of blocking movement forever.
+    // Mine rock
     if (
         target.type == 1
     ) {
@@ -1486,7 +1482,7 @@ static void tryMove(
         player.y
     );
 
-    // Collect special tile
+    // Collect
     if (
         target.type == 2 ||
         target.type == 3 ||
@@ -1532,7 +1528,7 @@ static void tryMove(
             player.y
         );
 
-        string message =
+        const string message =
             "DESCENDED TO DEPTH " +
             to_string(
                 player.depth
@@ -1590,7 +1586,8 @@ static void spawnBug() {
 
     Bug bug{};
 
-    bool validPosition = false;
+    bool validPosition =
+        false;
 
     for (
         int attempt = 0;
@@ -1616,21 +1613,22 @@ static void spawnBug() {
 
         const double distance =
             hypot(
-                bug.x -
-                    static_cast<float>(
-                        player.x
-                    ),
-                bug.y -
-                    static_cast<float>(
-                        player.y
-                    )
+                static_cast<double>(
+                    bug.x -
+                    player.x
+                ),
+                static_cast<double>(
+                    bug.y -
+                    player.y
+                )
             );
 
         if (
             distance > 8.0
         ) {
 
-            validPosition = true;
+            validPosition =
+                true;
 
             break;
         }
@@ -1754,7 +1752,7 @@ static void updateBugs(
 }
 
 // ============================================================
-// KEYBOARD INPUT
+// KEYBOARD
 // ============================================================
 
 static void handleKeyboard() {
@@ -1798,7 +1796,7 @@ static void handleKeyboard() {
 }
 
 // ============================================================
-// MOUSE INPUT
+// MOUSE
 // ============================================================
 
 static void handleMouse() {
@@ -1838,7 +1836,6 @@ static void handleMouse() {
         targetY -
         player.y;
 
-    // Only adjacent tile clicks
     if (
         abs(dx) +
         abs(dy) != 1
@@ -1877,7 +1874,7 @@ static void handleMouse() {
 }
 
 // ============================================================
-// RENDER
+// RENDER GAME
 // ============================================================
 
 static void renderGame() {
@@ -1920,7 +1917,7 @@ static void renderGame() {
 }
 
 // ============================================================
-// HUD UPDATE
+// HUD
 // ============================================================
 
 static void updateHUD() {
@@ -1937,7 +1934,60 @@ static void updateHUD() {
 }
 
 // ============================================================
-// RESTART GAME
+// EXPORTED MOVE FUNCTION
+// ============================================================
+
+extern "C"
+EMSCRIPTEN_KEEPALIVE
+void move_player(
+    int dx,
+    int dy
+) {
+
+    if (
+        gameOver ||
+        paused
+    ) {
+        return;
+    }
+
+    tryMove(
+        dx,
+        dy
+    );
+}
+
+// ============================================================
+// EXPORTED PAUSE FUNCTION
+// ============================================================
+
+extern "C"
+EMSCRIPTEN_KEEPALIVE
+void toggle_pause() {
+
+    if (gameOver) {
+        return;
+    }
+
+    paused =
+        !paused;
+
+    if (paused) {
+
+        js_message(
+            "PAUSED"
+        );
+
+    } else {
+
+        js_message(
+            "MINING"
+        );
+    }
+}
+
+// ============================================================
+// EXPORTED RESTART
 // ============================================================
 
 extern "C"
@@ -1989,14 +2039,15 @@ void restart_game() {
 }
 
 // ============================================================
-// MAIN LOOP
+// GAME LOOP
 // ============================================================
 
 static void gameLoop(
     void*
 ) {
 
-    static double previousTime = 0.0;
+    static double previousTime =
+        0.0;
 
     const double currentTime =
         emscripten_get_now() /
