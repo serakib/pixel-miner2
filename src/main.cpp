@@ -4,34 +4,46 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <ctime>
 #include <random>
 #include <string>
 #include <vector>
 
 using namespace std;
 
-static constexpr int MAP_W = 60;
-static constexpr int MAP_H = 40;
+// ============================================================
+// CONFIG
+// ============================================================
+
+static constexpr int MAP_W = 48;
+static constexpr int MAP_H = 34;
 static constexpr int TILE = 24;
-static constexpr int CANVAS_W = 960;
-static constexpr int CANVAS_H = 600;
 
-static constexpr int MAX_HP = 100;
-static constexpr int MAX_ENERGY = 100;
+static constexpr int START_ENERGY = 100;
+static constexpr int START_HP = 100;
+static constexpr int MAX_BUGS = 8;
 
-enum TileType {
-    FLOOR = 0,
-    ROCK = 1,
-    COPPER = 2,
-    CRYSTAL = 3,
-    ENERGY = 4,
-    EXIT_TILE = 5,
-    HAZARD = 6
-};
+static constexpr double MOVE_COOLDOWN = 0.12;
+
+// ============================================================
+// DATA
+// ============================================================
 
 struct Tile {
     int type;
     int revealed;
+};
+
+struct Player {
+    int x;
+    int y;
+    int hp;
+    int energy;
+    int score;
+    int copper;
+    int crystals;
+    int depth;
 };
 
 struct Bug {
@@ -40,760 +52,1730 @@ struct Bug {
     float speed;
 };
 
-struct Player {
-    int x = MAP_W / 2;
-    int y = MAP_H / 2;
-    int hp = MAX_HP;
-    int energy = MAX_ENERGY;
-    int score = 0;
-    int copper = 0;
-    int crystals = 0;
-    int depth = 1;
-};
-
 static vector<Tile> world;
 static vector<Bug> bugs;
-static Player player;
 
-static mt19937 rng(0xC0FFEEu);
+static Player player{};
 
 static int bestScore = 0;
-static bool paused = false;
+
 static bool gameOver = false;
+static bool paused = false;
 
 static double lastMove = 0.0;
-static double lastSpawn = 0.0;
-static double lastDamage = -100.0;
+static double lastBugSpawn = 0.0;
 
-static int exitX = MAP_W - 4;
-static int exitY = MAP_H - 4;
+static mt19937 rng(
+    static_cast<unsigned int>(time(nullptr))
+);
 
-static int idx(int x, int y) {
-    return y * MAP_W + x;
-}
+// ============================================================
+// RANDOM
+// ============================================================
 
-static bool inside(int x, int y) {
-    return x >= 0 && x < MAP_W && y >= 0 && y < MAP_H;
-}
-
-static int rnd(int a, int b) {
+static int randomInt(int a, int b) {
     uniform_int_distribution<int> d(a, b);
     return d(rng);
 }
 
-static float rndf(float a, float b) {
-    uniform_real_distribution<float> d(a, b);
+static double randomDouble(double a, double b) {
+    uniform_real_distribution<double> d(a, b);
     return d(rng);
 }
 
-// ------------------------------------------------------------
-// Browser bridge
-// ------------------------------------------------------------
+// ============================================================
+// MAP HELPERS
+// ============================================================
 
-EM_JS(void, js_init, (), {
+static int indexOf(int x, int y) {
+    return y * MAP_W + x;
+}
+
+static bool insideMap(int x, int y) {
+    return
+        x >= 0 &&
+        x < MAP_W &&
+        y >= 0 &&
+        y < MAP_H;
+}
+
+// ============================================================
+// JAVASCRIPT BRIDGE
+// ============================================================
+
+EM_JS(void, js_setup, (), {
     window.pixelMiner = window.pixelMiner || {};
-    const c = document.getElementById("gameCanvas");
-    if (!c) return;
 
-    window.pixelMiner.canvas = c;
-    window.pixelMiner.ctx = c.getContext("2d");
+    const canvas =
+        document.getElementById("gameCanvas") ||
+        document.querySelector("canvas");
+
+    if (!canvas) {
+        return;
+    }
+
+    window.pixelMiner.canvas = canvas;
+    window.pixelMiner.ctx = canvas.getContext("2d");
+
     window.pixelMiner.keys = {};
+    window.pixelMiner.mouseDown = false;
     window.pixelMiner.mouseX = 0;
     window.pixelMiner.mouseY = 0;
-    window.pixelMiner.mouseDown = false;
 
-    c.setAttribute("tabindex", "0");
-    c.focus();
+    canvas.tabIndex = 0;
+    canvas.focus();
 
-    const keyMap = {
-        ArrowUp: "up", w: "up",
-        ArrowDown: "down", s: "down",
-        ArrowLeft: "left", a: "left",
-        ArrowRight: "right", d: "right"
-    };
+    canvas.addEventListener("keydown", function(e) {
+        window.pixelMiner.keys[e.key] = true;
 
-    c.addEventListener("keydown", e => {
-        const k = keyMap[e.key];
-        if (k) {
-            window.pixelMiner.keys[k] = true;
-            e.preventDefault();
-        }
-        if (e.key === " " || e.key === "p" || e.key === "P") {
-            if (typeof Module !== "undefined" && Module.ccall) {
-                Module.ccall("toggle_pause", null, [], []);
-            }
+        if (
+            e.key === "ArrowUp" ||
+            e.key === "ArrowDown" ||
+            e.key === "ArrowLeft" ||
+            e.key === "ArrowRight" ||
+            e.key === " "
+        ) {
             e.preventDefault();
         }
     });
 
-    c.addEventListener("keyup", e => {
-        const k = keyMap[e.key];
-        if (k) {
-            window.pixelMiner.keys[k] = false;
-            e.preventDefault();
-        }
+    canvas.addEventListener("keyup", function(e) {
+        window.pixelMiner.keys[e.key] = false;
     });
 
-    const pointer = e => {
-        const r = c.getBoundingClientRect();
+    canvas.addEventListener("mousedown", function(e) {
+        const r = canvas.getBoundingClientRect();
+
         window.pixelMiner.mouseX =
-            (e.clientX - r.left) * c.width / r.width;
-        window.pixelMiner.mouseY =
-            (e.clientY - r.top) * c.height / r.height;
-    };
+            (e.clientX - r.left) *
+            canvas.width / r.width;
 
-    c.addEventListener("pointermove", pointer);
-    c.addEventListener("pointerdown", e => {
-        pointer(e);
+        window.pixelMiner.mouseY =
+            (e.clientY - r.top) *
+            canvas.height / r.height;
+
         window.pixelMiner.mouseDown = true;
-        c.setPointerCapture?.(e.pointerId);
     });
-    c.addEventListener("pointerup", e => {
+
+    canvas.addEventListener("mousemove", function(e) {
+        const r = canvas.getBoundingClientRect();
+
+        window.pixelMiner.mouseX =
+            (e.clientX - r.left) *
+            canvas.width / r.width;
+
+        window.pixelMiner.mouseY =
+            (e.clientY - r.top) *
+            canvas.height / r.height;
+    });
+
+    window.addEventListener("mouseup", function() {
         window.pixelMiner.mouseDown = false;
-        try { c.releasePointerCapture(e.pointerId); } catch (_) {}
     });
-    c.addEventListener("pointercancel", () => {
-        window.pixelMiner.mouseDown = false;
-    });
+
+    canvas.addEventListener(
+        "touchstart",
+        function(e) {
+            const t = e.touches[0];
+
+            if (!t) return;
+
+            const r = canvas.getBoundingClientRect();
+
+            window.pixelMiner.mouseX =
+                (t.clientX - r.left) *
+                canvas.width / r.width;
+
+            window.pixelMiner.mouseY =
+                (t.clientY - r.top) *
+                canvas.height / r.height;
+
+            window.pixelMiner.mouseDown = true;
+
+            e.preventDefault();
+        },
+        { passive: false }
+    );
+
+    canvas.addEventListener(
+        "touchmove",
+        function(e) {
+            const t = e.touches[0];
+
+            if (!t) return;
+
+            const r = canvas.getBoundingClientRect();
+
+            window.pixelMiner.mouseX =
+                (t.clientX - r.left) *
+                canvas.width / r.width;
+
+            window.pixelMiner.mouseY =
+                (t.clientY - r.top) *
+                canvas.height / r.height;
+
+            e.preventDefault();
+        },
+        { passive: false }
+    );
+
+    canvas.addEventListener(
+        "touchend",
+        function(e) {
+            window.pixelMiner.mouseDown = false;
+            e.preventDefault();
+        },
+        { passive: false }
+    );
 });
 
 EM_JS(int, js_key, (int key), {
-    if (!window.pixelMiner || !window.pixelMiner.keys) return 0;
-    const names = ["up", "down", "left", "right"];
-    return window.pixelMiner.keys[names[key]] ? 1 : 0;
+    if (
+        !window.pixelMiner ||
+        !window.pixelMiner.keys
+    ) {
+        return 0;
+    }
+
+    if (key === 0) {
+        return window.pixelMiner.keys["ArrowUp"] ||
+               window.pixelMiner.keys["w"] ||
+               window.pixelMiner.keys["W"] ? 1 : 0;
+    }
+
+    if (key === 1) {
+        return window.pixelMiner.keys["ArrowDown"] ||
+               window.pixelMiner.keys["s"] ||
+               window.pixelMiner.keys["S"] ? 1 : 0;
+    }
+
+    if (key === 2) {
+        return window.pixelMiner.keys["ArrowLeft"] ||
+               window.pixelMiner.keys["a"] ||
+               window.pixelMiner.keys["A"] ? 1 : 0;
+    }
+
+    if (key === 3) {
+        return window.pixelMiner.keys["ArrowRight"] ||
+               window.pixelMiner.keys["d"] ||
+               window.pixelMiner.keys["D"] ? 1 : 0;
+    }
+
+    return 0;
 });
 
 EM_JS(int, js_mouse_down, (), {
-    return window.pixelMiner && window.pixelMiner.mouseDown ? 1 : 0;
+    return
+        window.pixelMiner &&
+        window.pixelMiner.mouseDown
+        ? 1
+        : 0;
 });
 
 EM_JS(int, js_mouse_x, (), {
-    return window.pixelMiner ? window.pixelMiner.mouseX : 0;
+    return window.pixelMiner
+        ? window.pixelMiner.mouseX
+        : 0;
 });
 
 EM_JS(int, js_mouse_y, (), {
-    return window.pixelMiner ? window.pixelMiner.mouseY : 0;
+    return window.pixelMiner
+        ? window.pixelMiner.mouseY
+        : 0;
 });
 
 EM_JS(void, js_hud, (
-    int score, int best, int hp, int energy,
-    int depth, int copper, int crystals, int pausedState
+    int score,
+    int best,
+    int hp,
+    int energy,
+    int copper,
+    int crystals,
+    int depth
 ), {
-    const set = (id, value) => {
+    function setText(id, value) {
         const e = document.getElementById(id);
-        if (e) e.textContent = String(value);
-    };
+        if (e) {
+            e.textContent = String(value);
+        }
+    }
 
-    set("score", score);
-    set("bestScore", best);
-    set("hp", hp);
-    set("energy", energy);
-    set("depth", depth);
-    set("copper", copper);
-    set("crystals", crystals);
+    setText("score", score);
+    setText("bestScore", best);
+    setText("hp", hp);
+    setText("energy", energy);
+    setText("copper", copper);
+    setText("crystals", crystals);
+    setText("depth", depth);
 
-    const hpBar = document.getElementById("hpBar");
-    const energyBar = document.getElementById("energyBar");
-    if (hpBar) hpBar.style.width = Math.max(0, hp) + "%";
-    if (energyBar) energyBar.style.width = Math.max(0, energy) + "%";
+    const status =
+        document.getElementById("gameStatus") ||
+        document.getElementById("status");
 
-    const pause = document.getElementById("pauseBtn");
-    if (pause) pause.textContent = pausedState ? "▶ Resume" : "Ⅱ Pause";
-
-    const state = document.getElementById("state");
-    if (state) {
-        if (pausedState) state.textContent = "PAUSED";
-        else state.textContent = "EXPLORING";
+    if (status) {
+        status.textContent =
+            hp <= 0 || energy <= 0
+                ? "GAME OVER"
+                : "MINING";
     }
 });
 
-EM_JS(void, js_notice, (const char* msg), {
-    const text = UTF8ToString(msg);
-    const box = document.getElementById("notice");
-    if (!box) return;
+EM_JS(void, js_message, (const char* ptr), {
+    const message = UTF8ToString(ptr);
 
-    box.textContent = text;
-    box.classList.add("show");
+    const e =
+        document.getElementById("message");
 
-    clearTimeout(window.pixelMinerNoticeTimer);
-    window.pixelMinerNoticeTimer =
-        setTimeout(() => box.classList.remove("show"), 1500);
+    if (e) {
+        e.textContent = message;
+    }
 });
 
 EM_JS(void, js_save_best, (int score), {
     try {
-        localStorage.setItem("pixel_miner_best", String(score));
-    } catch (_) {}
+        localStorage.setItem(
+            "pixel_miner_best",
+            String(score)
+        );
+    } catch (e) {}
 });
 
 EM_JS(int, js_load_best, (), {
     try {
-        const n = parseInt(
-            localStorage.getItem("pixel_miner_best") || "0",
-            10
-        );
-        return Number.isFinite(n) ? n : 0;
-    } catch (_) {
+        const value =
+            localStorage.getItem("pixel_miner_best");
+
+        if (!value) {
+            return 0;
+        }
+
+        const n =
+            parseInt(value, 10);
+
+        return Number.isFinite(n)
+            ? n
+            : 0;
+    } catch (e) {
         return 0;
     }
 });
 
-// ------------------------------------------------------------
-// Renderer with camera follow
-// ------------------------------------------------------------
+
+// ============================================================
+// SIMPLE SAFE RENDERER
+// ============================================================
 
 EM_JS(void, js_render, (
-    int mapW, int mapH, int tile,
-    int worldPtr, int playerX, int playerY,
-    int bugCount, int bugsPtr,
+    int mapW,
+    int mapH,
+    int tile,
+    int worldPtr,
+    int playerX,
+    int playerY,
+    int bugCount,
+    int bugsPtr,
     int depth
 ), {
-    if (!window.pixelMiner || !window.pixelMiner.ctx) return;
+    if (
+        !window.pixelMiner ||
+        !window.pixelMiner.ctx
+    ) {
+        return;
+    }
 
-    const ctx = window.pixelMiner.ctx;
-    const canvas = window.pixelMiner.canvas;
-    const heap = HEAP32;
-    const base = worldPtr >> 2;
+    const ctx =
+        window.pixelMiner.ctx;
 
-    const worldW = mapW * tile;
-    const worldH = mapH * tile;
+    const canvas =
+        window.pixelMiner.canvas;
 
-    // Camera follows player, preventing the "stuck in center" feeling.
-    let camX = playerX * tile + tile / 2 - canvas.width / 2;
-    let camY = playerY * tile + tile / 2 - canvas.height / 2;
+    const heap =
+        HEAP32;
 
-    camX = Math.max(0, Math.min(camX, worldW - canvas.width));
-    camY = Math.max(0, Math.min(camY, worldH - canvas.height));
+    const base =
+        worldPtr >> 2;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = "#02070c";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const worldWidth =
+        mapW * tile;
+
+    const worldHeight =
+        mapH * tile;
+
+    let cameraX =
+        playerX * tile +
+        tile / 2 -
+        canvas.width / 2;
+
+    let cameraY =
+        playerY * tile +
+        tile / 2 -
+        canvas.height / 2;
+
+    cameraX = Math.max(
+        0,
+        Math.min(
+            cameraX,
+            Math.max(
+                0,
+                worldWidth - canvas.width
+            )
+        )
+    );
+
+    cameraY = Math.max(
+        0,
+        Math.min(
+            cameraY,
+            Math.max(
+                0,
+                worldHeight - canvas.height
+            )
+        )
+    );
+
+    ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    ctx.fillStyle =
+        "#02070c";
+
+    ctx.fillRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
 
     ctx.save();
-    ctx.translate(-camX, -camY);
 
-    // Subtle depth background.
-    ctx.fillStyle = depth % 2 ? "#07131d" : "#0b111b";
-    ctx.fillRect(0, 0, worldW, worldH);
+    ctx.translate(
+        -cameraX,
+        -cameraY
+    );
 
-    const startX = Math.max(0, Math.floor(camX / tile) - 1);
-    const startY = Math.max(0, Math.floor(camY / tile) - 1);
-    const endX = Math.min(mapW - 1, Math.ceil((camX + canvas.width) / tile) + 1);
-    const endY = Math.min(mapH - 1, Math.ceil((camY + canvas.height) / tile) + 1);
+    // Background
+    ctx.fillStyle =
+        depth % 2 === 0
+            ? "#0b151d"
+            : "#071019";
 
-    for (let y = startY; y <= endY; y++) {
-        for (let x = startX; x <= endX; x++) {
-            const off = base + (y * mapW + x) * 2;
-            const type = heap[off];
-            const revealed = heap[off + 1];
+    ctx.fillRect(
+        0,
+        0,
+        worldWidth,
+        worldHeight
+    );
 
-            const sx = x * tile;
-            const sy = y * tile;
+    const startX =
+        Math.max(
+            0,
+            Math.floor(cameraX / tile) - 1
+        );
+
+    const startY =
+        Math.max(
+            0,
+            Math.floor(cameraY / tile) - 1
+        );
+
+    const endX =
+        Math.min(
+            mapW - 1,
+            Math.ceil(
+                (cameraX + canvas.width) / tile
+            ) + 1
+        );
+
+    const endY =
+        Math.min(
+            mapH - 1,
+            Math.ceil(
+                (cameraY + canvas.height) / tile
+            ) + 1
+        );
+
+    // ========================================================
+    // TILES
+    // ========================================================
+
+    for (
+        let y = startY;
+        y <= endY;
+        y++
+    ) {
+        for (
+            let x = startX;
+            x <= endX;
+            x++
+        ) {
+
+            const offset =
+                base +
+                (y * mapW + x) * 2;
+
+            const type =
+                heap[offset];
+
+            const revealed =
+                heap[offset + 1];
+
+            const sx =
+                x * tile;
+
+            const sy =
+                y * tile;
 
             if (!revealed) {
-                ctx.fillStyle = "#02060b";
-                ctx.fillRect(sx, sy, tile - 1, tile - 1);
+
+                ctx.fillStyle =
+                    "#020509";
+
+                ctx.fillRect(
+                    sx,
+                    sy,
+                    tile - 1,
+                    tile - 1
+                );
+
                 continue;
             }
 
-            if (type === 0) ctx.fillStyle = "#1c2d39";
-            else if (type === 1) ctx.fillStyle = "#33434d";
-            else if (type === 2) ctx.fillStyle = "#a86d3d";
-            else if (type === 3) ctx.fillStyle = "#9878ff";
-            else if (type === 4) ctx.fillStyle = "#2eaa8b";
-            else if (type === 5) ctx.fillStyle = "#1b8d72";
-            else if (type === 6) ctx.fillStyle = "#5b3d47";
-            else ctx.fillStyle = "#17242d";
+            if (type === 0) {
+                ctx.fillStyle =
+                    "#1c2d39";
+            }
+            else if (type === 1) {
+                ctx.fillStyle =
+                    "#3a4852";
+            }
+            else if (type === 2) {
+                ctx.fillStyle =
+                    "#9b6338";
+            }
+            else if (type === 3) {
+                ctx.fillStyle =
+                    "#876ce0";
+            }
+            else if (type === 4) {
+                ctx.fillStyle =
+                    "#277e69";
+            }
+            else if (type === 5) {
+                ctx.fillStyle =
+                    "#157e67";
+            }
+            else if (type === 6) {
+                ctx.fillStyle =
+                    "#693b4a";
+            }
+            else {
+                ctx.fillStyle =
+                    "#18252e";
+            }
 
-            ctx.fillRect(sx, sy, tile - 1, tile - 1);
+            ctx.fillRect(
+                sx,
+                sy,
+                tile - 1,
+                tile - 1
+            );
 
-            // Tile grid
-            ctx.strokeStyle = "rgba(120,180,210,.055)";
-            ctx.strokeRect(sx, sy, tile - 1, tile - 1);
-
+            // Rock
             if (type === 1) {
-                ctx.fillStyle = "rgba(255,255,255,.08)";
-                ctx.fillRect(sx + 4, sy + 5, 6, 3);
-                ctx.fillRect(sx + 13, sy + 14, 5, 3);
+
+                ctx.fillStyle =
+                    "rgba(255,255,255,0.09)";
+
+                ctx.fillRect(
+                    sx + 4,
+                    sy + 5,
+                    6,
+                    3
+                );
+
+                ctx.fillRect(
+                    sx + 14,
+                    sy + 14,
+                    5,
+                    3
+                );
             }
 
+            // Copper
             if (type === 2) {
-                ctx.fillStyle = "#ffd09b";
-                ctx.fillRect(sx + 7, sy + 7, 10, 10);
+
+                ctx.fillStyle =
+                    "#ffd09b";
+
+                ctx.fillRect(
+                    sx + 7,
+                    sy + 7,
+                    10,
+                    10
+                );
             }
 
+            // Crystal
             if (type === 3) {
-                ctx.fillStyle = "#efe7ff";
+
+                ctx.fillStyle =
+                    "#eee5ff";
+
                 ctx.beginPath();
-                ctx.moveTo(sx + 12, sy + 4);
-                ctx.lineTo(sx + 19, sy + 12);
-                ctx.lineTo(sx + 12, sy + 20);
-                ctx.lineTo(sx + 5, sy + 12);
+
+                ctx.moveTo(
+                    sx + 12,
+                    sy + 4
+                );
+
+                ctx.lineTo(
+                    sx + 19,
+                    sy + 12
+                );
+
+                ctx.lineTo(
+                    sx + 12,
+                    sy + 20
+                );
+
+                ctx.lineTo(
+                    sx + 5,
+                    sy + 12
+                );
+
                 ctx.closePath();
+
                 ctx.fill();
             }
 
+            // Energy
             if (type === 4) {
-                ctx.fillStyle = "#c5fff1";
+
+                ctx.fillStyle =
+                    "#c6fff1";
+
                 ctx.beginPath();
-                ctx.arc(sx + 12, sy + 12, 6, 0, Math.PI * 2);
+
+                ctx.arc(
+                    sx + 12,
+                    sy + 12,
+                    6,
+                    0,
+                    Math.PI * 2
+                );
+
                 ctx.fill();
             }
 
+            // Exit
             if (type === 5) {
-                ctx.strokeStyle = "#7fffd5";
+
+                ctx.strokeStyle =
+                    "#7fffd5";
+
                 ctx.lineWidth = 2;
+
                 ctx.beginPath();
-                ctx.arc(sx + 12, sy + 12, 7, 0, Math.PI * 2);
+
+                ctx.arc(
+                    sx + 12,
+                    sy + 12,
+                    7,
+                    0,
+                    Math.PI * 2
+                );
+
                 ctx.stroke();
-                ctx.fillStyle = "#d7fff4";
-                ctx.font = "bold 9px system-ui";
-                ctx.textAlign = "center";
-                ctx.fillText("↓", sx + 12, sy + 15);
+
+                ctx.fillStyle =
+                    "#d7fff4";
+
+                ctx.font =
+                    "bold 12px system-ui";
+
+                ctx.textAlign =
+                    "center";
+
+                ctx.fillText(
+                    "↓",
+                    sx + 12,
+                    sy + 16
+                );
             }
 
+            // Hazard
             if (type === 6) {
-                ctx.fillStyle = "#ff8aa4";
+
+                ctx.fillStyle =
+                    "#ff7f9d";
+
                 ctx.beginPath();
-                ctx.arc(sx + 12, sy + 12, 4, 0, Math.PI * 2);
+
+                ctx.arc(
+                    sx + 12,
+                    sy + 12,
+                    5,
+                    0,
+                    Math.PI * 2
+                );
+
                 ctx.fill();
             }
         }
     }
 
-    // Bugs
-    if (bugCount > 0 && bugsPtr) {
-        const fh = HEAPF32;
-        const b = bugsPtr >> 2;
+    // ========================================================
+    // BUGS
+    // ========================================================
 
-        for (let i = 0; i < bugCount; i++) {
-            const bx = fh[b + i * 3];
-            const by = fh[b + i * 3 + 1];
-            const sx = bx * tile;
-            const sy = by * tile;
+    if (
+        bugCount > 0 &&
+        bugsPtr
+    ) {
 
-            ctx.fillStyle = "#ff527a";
+        const bugsHeap =
+            HEAPF32;
+
+        const bugBase =
+            bugsPtr >> 2;
+
+        for (
+            let i = 0;
+            i < bugCount;
+            i++
+        ) {
+
+            const bx =
+                bugsHeap[
+                    bugBase + i * 3
+                ];
+
+            const by =
+                bugsHeap[
+                    bugBase + i * 3 + 1
+                ];
+
+            const sx =
+                bx * tile;
+
+            const sy =
+                by * tile;
+
+            ctx.fillStyle =
+                "#ff527a";
+
             ctx.beginPath();
-            ctx.arc(sx + 12, sy + 12, 8, 0, Math.PI * 2);
+
+            ctx.arc(
+                sx + 12,
+                sy + 12,
+                8,
+                0,
+                Math.PI * 2
+            );
+
             ctx.fill();
 
-            ctx.fillStyle = "#fff";
-            ctx.fillRect(sx + 8, sy + 9, 2, 2);
-            ctx.fillRect(sx + 14, sy + 9, 2, 2);
+            ctx.fillStyle =
+                "#ffffff";
+
+            ctx.fillRect(
+                sx + 8,
+                sy + 9,
+                2,
+                2
+            );
+
+            ctx.fillRect(
+                sx + 14,
+                sy + 9,
+                2,
+                2
+            );
         }
     }
 
-    // Player glow
-    const px = playerX * tile + 12;
-    const py = playerY * tile + 12;
+    // ========================================================
+    // PLAYER
+    // ========================================================
 
-    const glow = ctx.createRadialGradient(px, py, 2, px, py, 24);
-    glow.addColorStop(0, "rgba(95,246,255,.35)");
-    glow.addColorStop(1, "rgba(95,246,255,0)");
-    ctx.fillStyle = glow;
-    ctx.fillRect(px - 25, py - 25, 50, 50);
+    const px =
+        playerX * tile + 12;
 
-    ctx.fillStyle = "#5ff6ff";
+    const py =
+        playerY * tile + 12;
+
+    ctx.fillStyle =
+        "#5ff6ff";
+
     ctx.beginPath();
-    ctx.arc(px, py, 9, 0, Math.PI * 2);
+
+    ctx.arc(
+        px,
+        py,
+        9,
+        0,
+        Math.PI * 2
+    );
+
     ctx.fill();
 
-    ctx.fillStyle = "#fff";
+    ctx.fillStyle =
+        "#ffffff";
+
     ctx.beginPath();
-    ctx.arc(px - 3, py - 3, 2, 0, Math.PI * 2);
-    ctx.arc(px + 3, py - 3, 2, 0, Math.PI * 2);
+
+    ctx.arc(
+        px - 3,
+        py - 3,
+        2,
+        0,
+        Math.PI * 2
+    );
+
+    ctx.arc(
+        px + 3,
+        py - 3,
+        2,
+        0,
+        Math.PI * 2
+    );
+
     ctx.fill();
 
     ctx.restore();
 
-    // Top-left mini depth marker inside canvas.
-    ctx.fillStyle = "rgba(0,0,0,.42)";
-    ctx.fillRect(12, 12, 130, 30);
-    ctx.fillStyle = "#bde9f2";
-    ctx.font = "bold 14px system-ui";
-    ctx.textAlign = "left";
-    ctx.fillText("DEPTH " + depth, 22, 32);
-}, 0);
+    // ========================================================
+    // DEPTH LABEL
+    // ========================================================
 
-// ------------------------------------------------------------
-// World generation
-// ------------------------------------------------------------
+    ctx.fillStyle =
+        "rgba(0,0,0,0.5)";
 
-static void revealAround(int cx, int cy) {
-    for (int dy = -3; dy <= 3; ++dy) {
-        for (int dx = -3; dx <= 3; ++dx) {
-            if (abs(dx) + abs(dy) <= 3) {
-                int x = cx + dx;
-                int y = cy + dy;
-                if (inside(x, y)) world[idx(x, y)].revealed = 1;
-            }
-        }
-    }
-}
+    ctx.fillRect(
+        12,
+        12,
+        125,
+        32
+    );
 
-static void carvePath(int x1, int y1, int x2, int y2) {
-    int x = x1;
-    int y = y1;
+    ctx.fillStyle =
+        "#bde9f2";
 
-    while (x != x2 || y != y2) {
-        world[idx(x, y)].type = FLOOR;
+    ctx.font =
+        "bold 14px system-ui";
 
-        if (x != x2 && (y == y2 || rnd(0, 1) == 0)) {
-            x += (x2 > x) ? 1 : -1;
-        } else if (y != y2) {
-            y += (y2 > y) ? 1 : -1;
-        }
+    ctx.textAlign =
+        "left";
 
-        for (int dy = -1; dy <= 1; ++dy) {
-            for (int dx = -1; dx <= 1; ++dx) {
-                int nx = x + dx, ny = y + dy;
-                if (inside(nx, ny)) world[idx(nx, ny)].type = FLOOR;
-            }
-        }
-    }
-    world[idx(x2, y2)].type = EXIT_TILE;
-}
+    ctx.fillText(
+        "DEPTH " + depth,
+        22,
+        33
+    );
+});
+
+// ============================================================
+// WORLD GENERATION
+// ============================================================
 
 static void generateWorld() {
-    world.assign(MAP_W * MAP_H, Tile{ROCK, 0});
-    bugs.clear();
 
-    player.x = MAP_W / 2;
-    player.y = MAP_H / 2;
+    world.clear();
 
-    exitX = MAP_W - 5;
-    exitY = MAP_H - 5;
+    world.resize(
+        MAP_W * MAP_H
+    );
 
-    // Mostly rock, with some walkable cells.
-    for (int y = 0; y < MAP_H; ++y) {
-        for (int x = 0; x < MAP_W; ++x) {
-            int r = rnd(0, 99);
-            int type = r < 63 ? ROCK : FLOOR;
-            if (r >= 63 && r < 69) type = HAZARD;
-            world[idx(x, y)] = {type, 0};
+    const depth =
+        player.depth;
+
+    for (
+        int y = 0;
+        y < MAP_H;
+        y++
+    ) {
+        for (
+            int x = 0;
+            x < MAP_W;
+            x++
+        ) {
+
+            Tile tile;
+
+            tile.revealed = 0;
+
+            int roll =
+                randomInt(0, 99);
+
+            int rockChance =
+                min(
+                    32,
+                    22 + depth * 2
+                );
+
+            if (roll < rockChance) {
+                tile.type = 1;
+            }
+            else if (roll < 78) {
+                tile.type = 0;
+            }
+            else if (roll < 91) {
+                tile.type = 2;
+            }
+            else if (roll < 97) {
+                tile.type = 3;
+            }
+            else {
+                tile.type = 4;
+            }
+
+            world[
+                indexOf(x, y)
+            ] = tile;
         }
     }
 
-    // Guaranteed route from spawn to exit.
-    carvePath(player.x, player.y, exitX, exitY);
+    // Safe starting area
+    const sx = MAP_W / 2;
+    const sy = MAP_H / 2;
 
-    // Resources.
-    const int resourceCount = 65 + player.depth * 4;
-    for (int i = 0; i < resourceCount; ++i) {
-        int x = rnd(2, MAP_W - 3);
-        int y = rnd(2, MAP_H - 3);
+    for (
+        int dy = -2;
+        dy <= 2;
+        dy++
+    ) {
+        for (
+            int dx = -2;
+            dx <= 2;
+            dx++
+        ) {
 
-        if (abs(x - player.x) + abs(y - player.y) < 5) continue;
-        if (world[idx(x, y)].type != ROCK) continue;
+            const int x =
+                sx + dx;
 
-        int r = rnd(0, 99);
-        if (r < 65) world[idx(x, y)].type = COPPER;
-        else if (r < 92) world[idx(x, y)].type = CRYSTAL;
-        else world[idx(x, y)].type = ENERGY;
+            const int y =
+                sy + dy;
+
+            if (!insideMap(x, y)) {
+                continue;
+            }
+
+            world[
+                indexOf(x, y)
+            ].type = 0;
+
+            world[
+                indexOf(x, y)
+            ].revealed = 1;
+        }
     }
 
-    // Keep exit safe.
-    world[idx(exitX, exitY)].type = EXIT_TILE;
+    // Exit
+    int exitX;
+    int exitY;
 
-    revealAround(player.x, player.y);
+    do {
+        exitX =
+            randomInt(3, MAP_W - 4);
 
-    for (int i = 0; i < min(2 + player.depth / 2, 6); ++i) {
-        // Spawn later via timer; this only makes depth scaling explicit.
+        exitY =
+            randomInt(3, MAP_H - 4);
+    }
+    while (
+        abs(exitX - sx) +
+        abs(exitY - sy) < 12
+    );
+
+    world[
+        indexOf(exitX, exitY)
+    ].type = 5;
+
+    world[
+        indexOf(exitX, exitY)
+    ].revealed = 1;
+
+    // Hazards
+    const int hazardCount =
+        min(
+            10,
+            3 + player.depth
+        );
+
+    for (
+        int i = 0;
+        i < hazardCount;
+        i++
+    ) {
+
+        int hx =
+            randomInt(2, MAP_W - 3);
+
+        int hy =
+            randomInt(2, MAP_H - 3);
+
+        if (
+            abs(hx - sx) +
+            abs(hy - sy) < 7
+        ) {
+            continue;
+        }
+
+        world[
+            indexOf(hx, hy)
+        ].type = 6;
     }
 }
 
-// ------------------------------------------------------------
-// Gameplay
-// ------------------------------------------------------------
+// ============================================================
+// REVEAL
+// ============================================================
 
-static void gameOverNow(const char* msg) {
-    gameOver = true;
-    js_notice(msg);
+static void revealAround(
+    int cx,
+    int cy
+) {
+
+    for (
+        int dy = -2;
+        dy <= 2;
+        dy++
+    ) {
+        for (
+            int dx = -2;
+            dx <= 2;
+            dx++
+        ) {
+
+            if (
+                abs(dx) +
+                abs(dy) > 2
+            ) {
+                continue;
+            }
+
+            const int x =
+                cx + dx;
+
+            const int y =
+                cy + dy;
+
+            if (
+                insideMap(x, y)
+            ) {
+                world[
+                    indexOf(x, y)
+                ].revealed = 1;
+            }
+        }
+    }
 }
 
-static void descend() {
-    player.depth++;
-    player.score += 100 + player.depth * 20;
-    player.energy = min(MAX_ENERGY, player.energy + 35);
-    player.hp = min(MAX_HP, player.hp + 20);
+// ============================================================
+// MINING
+// ============================================================
 
-    generateWorld();
+static void mineTile(
+    int x,
+    int y
+) {
 
-    string msg = "DEPTH " + to_string(player.depth) + " — KEEP MINING!";
-    js_notice(msg.c_str());
-}
+    if (!insideMap(x, y)) {
+        return;
+    }
 
-static void mineTile(int x, int y) {
-    if (!inside(x, y)) return;
+    Tile& tile =
+        world[indexOf(x, y)];
 
-    Tile& t = world[idx(x, y)];
-    t.revealed = 1;
+    tile.revealed = 1;
 
-    if (t.type == ROCK) {
-        t.type = FLOOR;
+    if (tile.type == 1) {
+
+        tile.type = 0;
+
+        player.score +=
+            1 + player.depth;
+
         player.energy -= 2;
-        player.score += 2;
-    } else if (t.type == COPPER) {
-        t.type = FLOOR;
-        player.energy -= 2;
+    }
+
+    else if (tile.type == 2) {
+
+        tile.type = 0;
+
         player.copper++;
-        player.score += 15;
-    } else if (t.type == CRYSTAL) {
-        t.type = FLOOR;
-        player.energy -= 3;
-        player.crystals++;
-        player.score += 40;
-    } else if (t.type == ENERGY) {
-        t.type = FLOOR;
-        player.energy = min(MAX_ENERGY, player.energy + 25);
-        player.score += 20;
-        js_notice("ENERGY +25");
-    } else if (t.type == HAZARD) {
-        t.type = FLOOR;
-        player.energy -= 3;
-        player.hp -= 10;
-        player.score += 5;
-        js_notice("Hazard! -10 HP");
+
+        player.score +=
+            10 + player.depth * 2;
+
+        player.energy -= 2;
     }
 
-    if (player.energy < 0) player.energy = 0;
-    if (player.hp < 0) player.hp = 0;
+    else if (tile.type == 3) {
+
+        tile.type = 0;
+
+        player.crystals++;
+
+        player.score +=
+            25 + player.depth * 3;
+
+        player.energy -= 2;
+    }
+
+    else if (tile.type == 4) {
+
+        tile.type = 0;
+
+        player.score += 15;
+
+        player.energy += 20;
+
+        player.energy =
+            min(
+                player.energy,
+                START_ENERGY
+            );
+    }
+
+    else if (tile.type == 6) {
+
+        tile.type = 0;
+
+        player.hp -=
+            12;
+
+        player.score += 3;
+    }
 }
 
-static void movePlayer(int dx, int dy) {
-    if (paused || gameOver) return;
-    if (dx == 0 && dy == 0) return;
+// ============================================================
+// MOVE
+// ============================================================
 
-    int nx = player.x + dx;
-    int ny = player.y + dy;
+static void tryMove(
+    int dx,
+    int dy
+) {
 
-    if (!inside(nx, ny)) {
-        js_notice("Map boundary");
+    if (
+        gameOver ||
+        paused
+    ) {
         return;
     }
 
-    Tile& target = world[idx(nx, ny)];
+    if (
+        player.energy <= 0
+    ) {
 
-    // Every solid tile can be mined, so movement never permanently traps the player.
-    if (target.type == ROCK ||
-        target.type == COPPER ||
-        target.type == CRYSTAL ||
-        target.type == ENERGY ||
-        target.type == HAZARD) {
-        mineTile(nx, ny);
+        player.energy = 0;
 
-        if (player.energy <= 0 || player.hp <= 0) {
-            gameOverNow(player.hp <= 0 ? "MISSION FAILED" : "OUT OF ENERGY");
-        }
+        gameOver = true;
+
+        js_message(
+            "OUT OF ENERGY"
+        );
+
         return;
     }
 
+    const int nx =
+        player.x + dx;
+
+    const int ny =
+        player.y + dy;
+
+    if (
+        !insideMap(nx, ny)
+    ) {
+        return;
+    }
+
+    Tile& target =
+        world[indexOf(nx, ny)];
+
+    // Rock: mine it instead of getting stuck
+    if (target.type == 1) {
+
+        mineTile(
+            nx,
+            ny
+        );
+
+        revealAround(
+            player.x,
+            player.y
+        );
+
+        return;
+    }
+
+    // Move
     player.x = nx;
     player.y = ny;
 
-    player.energy = max(0, player.energy - 1);
-    revealAround(player.x, player.y);
+    player.energy--;
 
-    if (target.type == EXIT_TILE) {
-        descend();
-        return;
+    revealAround(
+        player.x,
+        player.y
+    );
+
+    // Resource
+    if (
+        target.type == 2 ||
+        target.type == 3 ||
+        target.type == 4 ||
+        target.type == 6
+    ) {
+
+        mineTile(
+            nx,
+            ny
+        );
     }
 
-    if (player.energy <= 0) {
-        gameOverNow("OUT OF ENERGY");
+    // Exit
+    if (
+        target.type == 5
+    ) {
+
+        player.depth++;
+
+        player.score +=
+            100 * player.depth;
+
+        player.energy =
+            min(
+                START_ENERGY,
+                player.energy + 30
+            );
+
+        player.hp =
+            min(
+                START_HP,
+                player.hp + 20
+            );
+
+        bugs.clear();
+
+        generateWorld();
+
+        revealAround(
+            player.x,
+            player.y
+        );
+
+        js_message(
+            "DESCENDED TO DEPTH " +
+            to_string(player.depth)
+                .c_str()
+        );
     }
-}
 
-static void spawnBug() {
-    int maxBugs = min(12, 2 + player.depth / 2);
-    if ((int)bugs.size() >= maxBugs) return;
+    if (
+        player.energy <= 0 ||
+        player.hp <= 0
+    ) {
 
-    for (int attempt = 0; attempt < 40; ++attempt) {
-        float x = (float)rndf(2.0f, (float)MAP_W - 3.0f);
-        float y = (float)rndf(2.0f, (float)MAP_H - 3.0f);
+        player.energy =
+            max(0, player.energy);
 
-        if (hypot(x - player.x, y - player.y) < 9.0) continue;
+        player.hp =
+            max(0, player.hp);
 
-        int tx = (int)x;
-        int ty = (int)y;
-        if (!inside(tx, ty)) continue;
+        gameOver = true;
 
-        int type = world[idx(tx, ty)].type;
-        if (type == ROCK || type == EXIT_TILE) continue;
-
-        bugs.push_back({
-            x,
-            y,
-            rndf(0.45f + player.depth * 0.01f,
-                 0.75f + player.depth * 0.015f)
-        });
-        return;
-    }
-}
-
-static void updateBugs(double dt) {
-    if (paused || gameOver) return;
-
-    for (Bug& b : bugs) {
-        float dx = player.x + 0.5f - b.x;
-        float dy = player.y + 0.5f - b.y;
-        float d = sqrtf(dx * dx + dy * dy);
-
-        if (d > 0.05f) {
-            b.x += dx / d * b.speed * (float)dt;
-            b.y += dy / d * b.speed * (float)dt;
-        }
-
-        if (d < 0.65f) {
-            double now = emscripten_get_now() / 1000.0;
-            if (now - lastDamage > 0.75) {
-                lastDamage = now;
-                player.hp -= 8;
-                js_notice("Crawler hit! -8 HP");
-
-                if (player.hp <= 0) {
-                    player.hp = 0;
-                    gameOverNow("DEFEATED BY CRAWLERS");
-                }
-            }
-        }
-    }
-}
-
-static void handleKeyboard() {
-    if (js_key(0)) movePlayer(0, -1);
-    else if (js_key(1)) movePlayer(0, 1);
-    else if (js_key(2)) movePlayer(-1, 0);
-    else if (js_key(3)) movePlayer(1, 0);
-}
-
-static void handleMouse() {
-    if (!js_mouse_down()) return;
-
-    // Canvas camera math is mirrored here.
-    int camX = player.x * TILE + TILE / 2 - CANVAS_W / 2;
-    int camY = player.y * TILE + TILE / 2 - CANVAS_H / 2;
-
-    camX = max(0, min(camX, MAP_W * TILE - CANVAS_W));
-    camY = max(0, min(camY, MAP_H * TILE - CANVAS_H));
-
-    int tx = (js_mouse_x() + camX) / TILE;
-    int ty = (js_mouse_y() + camY) / TILE;
-
-    int dx = tx - player.x;
-    int dy = ty - player.y;
-
-    if (abs(dx) + abs(dy) == 1) {
-        movePlayer(
-            dx > 0 ? 1 : dx < 0 ? -1 : 0,
-            dy > 0 ? 1 : dy < 0 ? -1 : 0
+        js_message(
+            "RUN OVER"
         );
     }
 }
 
-// ------------------------------------------------------------
-// Public controls
-// ------------------------------------------------------------
+// ============================================================
+// BUGS
+// ============================================================
 
-extern "C" {
+static void spawnBug() {
 
-EMSCRIPTEN_KEEPALIVE
-void move_player(int dx, int dy) {
-    movePlayer(dx, dy);
-}
+    if (
+        static_cast<int>(
+            bugs.size()
+        ) >=
+        min(
+            MAX_BUGS,
+            3 + player.depth
+        )
+    ) {
+        return;
+    }
 
-EMSCRIPTEN_KEEPALIVE
-void toggle_pause() {
-    if (gameOver) return;
-    paused = !paused;
-    js_notice(paused ? "GAME PAUSED" : "RESUMED");
-}
+    Bug bug{};
 
-EMSCRIPTEN_KEEPALIVE
-void restart_game() {
-    player = Player{};
-    player.x = MAP_W / 2;
-    player.y = MAP_H / 2;
-    paused = false;
-    gameOver = false;
-    lastMove = 0;
-    lastSpawn = 0;
-    lastDamage = -100;
+    bool valid = false;
 
-    generateWorld();
-    js_notice("NEW EXPEDITION");
-}
+    for (
+        int attempt = 0;
+        attempt < 50;
+        attempt++
+    ) {
 
-}
+        bug.x =
+            static_cast<float>(
+                randomDouble(
+                    2.0,
+                    MAP_W - 3.0
+                )
+            );
 
-// ------------------------------------------------------------
-// Tick
-// ------------------------------------------------------------
+        bug.y =
+            static_cast<float>(
+                randomDouble(
+                    2.0,
+                    MAP_H - 3.0
+                )
+            );
 
-static void tick(void*) {
-    static double previous = 0.0;
-    double now = emscripten_get_now() / 1000.0;
-    double dt = now - previous;
-    previous = now;
+        const double d =
+            hypot(
+                bug.x -
+                    player.x,
+                bug.y -
+                    player.y
+            );
 
-    if (dt < 0) dt = 0;
-    if (dt > 0.1) dt = 0.1;
-
-    if (!paused && !gameOver) {
-        if (now - lastMove >= 0.12) {
-            handleKeyboard();
-            lastMove = now;
-        }
-
-        if (now - lastSpawn >= max(2.5, 5.0 - player.depth * 0.08)) {
-            spawnBug();
-            lastSpawn = now;
-        }
-
-        updateBugs(dt);
-
-        if (player.score > bestScore) {
-            bestScore = player.score;
-            js_save_best(bestScore);
+        if (d > 8.0) {
+            valid = true;
+            break;
         }
     }
+
+    if (!valid) {
+        return;
+    }
+
+    bug.speed =
+        static_cast<float>(
+            randomDouble(
+                0.25,
+                0.55 +
+                player.depth * 0.03
+            )
+        );
+
+    bugs.push_back(
+        bug
+    );
+}
+
+static void updateBugs(
+    double dt
+) {
+
+    if (
+        gameOver ||
+        paused
+    ) {
+        return;
+    }
+
+    for (
+        Bug& bug :
+        bugs
+    ) {
+
+        const double dx =
+            player.x -
+            bug.x;
+
+        const double dy =
+            player.y -
+            bug.y;
+
+        const double d =
+            sqrt(
+                dx * dx +
+                dy * dy
+            );
+
+        if (d > 0.05) {
+
+            bug.x +=
+                static_cast<float>(
+                    dx / d *
+                    bug.speed *
+                    dt
+                );
+
+            bug.y +=
+                static_cast<float>(
+                    dy / d *
+                    bug.speed *
+                    dt
+                );
+        }
+
+        if (d < 0.7) {
+
+            player.hp -=
+                8 + player.depth;
+
+            bug.x =
+                static_cast<float>(
+                    randomDouble(
+                        2,
+                        MAP_W - 3
+                    )
+                );
+
+            bug.y =
+                static_cast<float>(
+                    randomDouble(
+                        2,
+                        MAP_H - 3
+                    )
+                );
+
+            if (
+                player.hp <= 0
+            ) {
+
+                player.hp = 0;
+
+                gameOver = true;
+
+                js_message(
+                    "CAUGHT BY A CAVE CRAWLER"
+                );
+            }
+        }
+    }
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+
+static void keyboardInput() {
+
+    if (
+        js_key(0)
+    ) {
+        tryMove(0, -1);
+    }
+    else if (
+        js_key(1)
+    ) {
+        tryMove(0, 1);
+    }
+    else if (
+        js_key(2)
+    ) {
+        tryMove(-1, 0);
+    }
+    else if (
+        js_key(3)
+    ) {
+        tryMove(1, 0);
+    }
+}
+
+static void mouseInput() {
+
+    if (!js_mouse_down()) {
+        return;
+    }
+
+    const int mx =
+        js_mouse_x();
+
+    const int my =
+        js_mouse_y();
+
+    const int tx =
+        mx / TILE;
+
+    const int ty =
+        my / TILE;
+
+    if (
+        !insideMap(tx, ty)
+    ) {
+        return;
+    }
+
+    const int dx =
+        tx - player.x;
+
+    const int dy =
+        ty - player.y;
+
+    if (
+        abs(dx) +
+        abs(dy) != 1
+    ) {
+        return;
+    }
+
+    if (dx > 0) {
+        tryMove(1, 0);
+    }
+    else if (dx < 0) {
+        tryMove(-1, 0);
+    }
+    else if (dy > 0) {
+        tryMove(0, 1);
+    }
+    else {
+        tryMove(0, -1);
+    }
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+
+static void render() {
+
+    if (world.empty()) {
+        return;
+    }
+
+    js_render(
+        MAP_W,
+        MAP_H,
+        TILE,
+        static_cast<int>(
+            reinterpret_cast<uintptr_t>(
+                world.data()
+            )
+        ),
+        player.x,
+        player.y,
+        static_cast<int>(
+            bugs.size()
+        ),
+        bugs.empty()
+            ? 0
+            : static_cast<int>(
+                reinterpret_cast<uintptr_t>(
+                    bugs.data()
+                )
+            ),
+        player.depth
+    );
+}
+
+// ============================================================
+// HUD
+// ============================================================
+
+static void updateHUD() {
 
     js_hud(
         player.score,
         bestScore,
         player.hp,
         player.energy,
-        player.depth,
         player.copper,
         player.crystals,
-        paused ? 1 : 0
-    );
-
-    js_render(
-        MAP_W,
-        MAP_H,
-        TILE,
-        (int)(uintptr_t)world.data(),
-        player.x,
-        player.y,
-        (int)bugs.size(),
-        bugs.empty() ? 0 : (int)(uintptr_t)bugs.data(),
         player.depth
     );
 }
 
-int main() {
-    bestScore = js_load_best();
+// ============================================================
+// RESTART
+// ============================================================
 
-    js_init();
+extern "C"
+EMSCRIPTEN_KEEPALIVE
+void restart_game() {
 
-    player = Player{};
-    player.x = MAP_W / 2;
-    player.y = MAP_H / 2;
+    player.x =
+        MAP_W / 2;
+
+    player.y =
+        MAP_H / 2;
+
+    player.hp =
+        START_HP;
+
+    player.energy =
+        START_ENERGY;
+
+    player.score = 0;
+
+    player.copper = 0;
+
+    player.crystals = 0;
+
+    player.depth = 1;
+
+    gameOver = false;
+    paused = false;
+
+    bugs.clear();
+
+    lastMove = 0.0;
+    lastBugSpawn = 0.0;
 
     generateWorld();
 
-    js_notice("WASD / ARROWS TO MOVE");
+    revealAround(
+        player.x,
+        player.y
+    );
+
+    js_message(
+        "MINING"
+    );
+
+    updateHUD();
+
+    render();
+}
+
+// ============================================================
+// MAIN LOOP
+// ============================================================
+
+static void tick(
+    void*
+) {
+
+    static double previous =
+        0.0;
+
+    const double now =
+        emscripten_get_now()
+        / 1000.0;
+
+    double dt =
+        now - previous;
+
+    previous = now;
+
+    if (
+        dt < 0.0
+    ) {
+        dt = 0.0;
+    }
+
+    if (
+        dt > 0.1
+    ) {
+        dt = 0.1;
+    }
+
+    if (
+        !gameOver &&
+        !paused
+    ) {
+
+        if (
+            now - lastMove
+            >= MOVE_COOLDOWN
+        ) {
+
+            keyboardInput();
+
+            mouseInput();
+
+            lastMove =
+                now;
+        }
+
+        if (
+            now - lastBugSpawn
+            >= max(
+                2.5,
+                6.0 -
+                player.depth * 0.2
+            )
+        ) {
+
+            spawnBug();
+
+            lastBugSpawn =
+                now;
+        }
+
+        updateBugs(
+            dt
+        );
+
+        if (
+            player.score >
+            bestScore
+        ) {
+
+            bestScore =
+                player.score;
+
+            js_save_best(
+                bestScore
+            );
+        }
+    }
+
+    updateHUD();
+
+    render();
+}
+
+// ============================================================
+// MAIN
+// ============================================================
+
+int main() {
+
+    js_setup();
+
+    bestScore =
+        js_load_best();
+
+    player.x =
+        MAP_W / 2;
+
+    player.y =
+        MAP_H / 2;
+
+    player.hp =
+        START_HP;
+
+    player.energy =
+        START_ENERGY;
+
+    player.score = 0;
+
+    player.copper = 0;
+
+    player.crystals = 0;
+
+    player.depth = 1;
+
+    gameOver = false;
+    paused = false;
+
+    generateWorld();
+
+    revealAround(
+        player.x,
+        player.y
+    );
+
+    js_message(
+        "MINING"
+    );
+
+    updateHUD();
+
+    render();
 
     emscripten_set_main_loop_arg(
         tick,
