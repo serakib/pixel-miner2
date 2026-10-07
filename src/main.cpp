@@ -23,7 +23,7 @@ static constexpr int TILE = 24;
 static constexpr int START_HP = 100;
 static constexpr int START_ENERGY = 100;
 
-static constexpr int ENERGY_REGEN_PER_SECOND = 5;
+static constexpr int ENERGY_REGEN_PER_SECOND = 1;
 
 static constexpr int MAX_BUGS = 8;
 
