@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Pixel Miner</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="game-shell">
+    <header class="topbar">
+      <div>
+        <div class="brand">⛏ PIXEL MINER</div>
+        <div class="subtitle">Deep-cave expedition</div>
+      </div>
+      <div class="actions">
+        <button id="howBtn" class="btn">❔ How to Play</button>
+        <button id="pauseBtn" class="btn">Ⅱ Pause</button>
+        <button id="restartBtn" class="btn danger">↻ Restart</button>
+      </div>
+    </header>
+
+    <section class="hud">
+      <div class="stat"><span>Score</span><b id="score">0</b></div>
+      <div class="stat"><span>Best</span><b id="bestScore">0</b></div>
+      <div class="stat"><span>Depth</span><b id="depth">1</b></div>
+      <div class="stat"><span>HP</span><b id="hp">100</b></div>
+      <div class="stat"><span>Energy</span><b id="energy">100</b></div>
+      <div class="stat"><span>🟫 Copper</span><b id="copper">0</b></div>
+      <div class="stat"><span>💎 Crystal</span><b id="crystals">0</b></div>
+      <div class="state" id="state">EXPLORING</div>
+    </section>
+
+    <div class="bars">
+      <div class="bar"><span>HP</span><i id="hpBar"></i></div>
+      <div class="bar"><span>ENERGY</span><i id="energyBar"></i></div>
+    </div>
+
+    <section class="stage">
+      <canvas id="gameCanvas" width="960" height="600"></canvas>
+      <div id="notice" class="notice"></div>
+
+      <div class="touch-controls" aria-label="Touch controls">
+        <button data-dir="up">▲</button>
+        <div>
+          <button data-dir="left">◀</button>
+          <button data-dir="down">▼</button>
+          <button data-dir="right">▶</button>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <span>WASD / Arrow Keys • Click an adjacent tile • Touch controls on mobile</span>
+      <span>Find the green exit to descend deeper.</span>
+    </footer>
+  </main>
+
+  <div id="howModal" class="modal hidden">
+    <div class="modal-card">
+      <button id="closeHow" class="close">×</button>
+      <h2>⛏ How to Play</h2>
+
+      <div class="guide-grid">
+        <div>
+          <h3>🎯 Goal</h3>
+          <p>Explore the cave, collect resources, survive crawlers and reach the <b>green exit</b> to descend to the next depth.</p>
+        </div>
+        <div>
+          <h3>🕹 Controls</h3>
+          <p><b>WASD / Arrow Keys</b> move. You can also click an adjacent tile. On mobile, use the D-pad.</p>
+        </div>
+        <div>
+          <h3>⛏ Mining</h3>
+          <p>Walking into a rock or resource tile mines it. Rocks cost a little energy; valuable minerals give more score.</p>
+        </div>
+        <div>
+          <h3>💎 Resources</h3>
+          <p><b>Copper</b> = 15 points. <b>Crystal</b> = 40 points. Energy cells restore energy.</p>
+        </div>
+        <div>
+          <h3>❤️ Survival</h3>
+          <p>Cave crawlers chase you. Avoid them. Hazards reduce HP. If HP or energy reaches zero, the expedition ends.</p>
+        </div>
+        <div>
+          <h3>⬇️ Depth</h3>
+          <p>Every green exit takes you deeper. Deeper levels become more dangerous and spawn more crawlers.</p>
+        </div>
+      </div>
+
+      <button id="startBtn" class="primary">Start Mining</button>
+    </div>
+  </div>
+
+  <script>
+    const howModal = document.getElementById("howModal");
+    const openHow = () => howModal.classList.remove("hidden");
+    const closeHow = () => howModal.classList.add("hidden");
+
+    document.getElementById("howBtn").onclick = openHow;
+    document.getElementById("closeHow").onclick = closeHow;
+    document.getElementById("startBtn").onclick = closeHow;
+
+    document.getElementById("pauseBtn").onclick = () => {
+      if (window.Module && Module.ccall) {
+        Module.ccall("toggle_pause", null, [], []);
+      }
+    };
+
+    document.getElementById("restartBtn").onclick = () => {
+      if (window.Module && Module.ccall) {
+        Module.ccall("restart_game", null, [], []);
+      }
+    };
+
+    const directions = {
+      up: [0, -1],
+      down: [0, 1],
+      left: [-1, 0],
+      right: [1, 0]
+    };
+
+    document.querySelectorAll("[data-dir]").forEach(btn => {
+      btn.addEventListener("pointerdown", e => {
+        e.preventDefault();
+        const d = directions[btn.dataset.dir];
+        if (window.Module && Module.ccall) {
+          Module.ccall("move_player", null, ["number", "number"], d);
+        }
+      });
+    });
+
+    window.addEventListener("keydown", e => {
+      if (e.key === "Escape") closeHow();
+    });
+
+    var Module = {
+      print: function() {},
+      printErr: function() {}
+    };
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>

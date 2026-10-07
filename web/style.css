@@ -1,0 +1,62 @@
+*{box-sizing:border-box}
+:root{
+  color-scheme:dark;
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;
+  background:#02070c;
+  color:#e9f7fb
+}
+body{margin:0;min-height:100vh;background:
+ radial-gradient(circle at 50% 0%,#10202c 0,#040a10 42%,#020509 100%)}
+.game-shell{width:min(1220px,100%);margin:auto;padding:18px}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px}
+.brand{font-weight:900;letter-spacing:2px;font-size:22px}
+.subtitle{color:#7895a1;font-size:12px;margin-top:2px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.btn,.touch-controls button,.primary{border:1px solid #294553;background:#0d1b24;color:#dffaff;border-radius:10px;padding:9px 12px;font-weight:800;cursor:pointer}
+.btn:hover,.touch-controls button:hover{background:#152c38}
+.btn.danger{border-color:#693847}
+.hud{display:grid;grid-template-columns:repeat(7,1fr) auto;gap:8px}
+.stat,.state{background:rgba(9,20,27,.9);border:1px solid #18323e;border-radius:10px;padding:8px 10px;min-width:0}
+.stat span{display:block;color:#72909b;font-size:10px;text-transform:uppercase}
+.stat b{font-size:18px}
+.state{display:flex;align-items:center;justify-content:center;color:#73f6d2;font-size:11px;font-weight:900}
+.bars{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}
+.bar{height:12px;border-radius:999px;background:#0a141b;border:1px solid #18313b;overflow:hidden;position:relative}
+.bar span{position:absolute;left:7px;top:-2px;font-size:9px;font-weight:900;z-index:2;color:#d9eef2}
+.bar i{display:block;height:100%;width:100%;background:#41d9a8;transition:width .15s}
+.bar:nth-child(2) i{background:#4fdcff}
+.stage{position:relative;border:1px solid #18323e;border-radius:14px;overflow:hidden;background:#01060a;box-shadow:0 20px 70px rgba(0,0,0,.35)}
+canvas{display:block;width:100%;height:auto;aspect-ratio:16/10;image-rendering:auto;outline:none;touch-action:none}
+.notice{position:absolute;top:18px;left:50%;transform:translate(-50%,-10px);opacity:0;padding:9px 14px;border:1px solid #31505e;border-radius:999px;background:rgba(3,12,17,.9);font-weight:900;color:#bffdf0;pointer-events:none;transition:.18s;white-space:nowrap}
+.notice.show{opacity:1;transform:translate(-50%,0)}
+.touch-controls{display:none;position:absolute;left:14px;bottom:14px;flex-direction:column;align-items:center;gap:4px}
+.touch-controls>div{display:flex;gap:4px}
+.touch-controls button{width:48px;height:42px;padding:0;background:rgba(7,20,27,.82);backdrop-filter:blur(5px)}
+footer{display:flex;justify-content:space-between;gap:12px;color:#617c87;font-size:11px;padding:9px 2px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:grid;place-items:center;padding:20px;z-index:10}
+.modal.hidden{display:none}
+.modal-card{width:min(760px,100%);max-height:90vh;overflow:auto;position:relative;background:#09151d;border:1px solid #274957;border-radius:18px;padding:26px;box-shadow:0 25px 100px rgba(0,0,0,.65)}
+.modal-card h2{margin:0 0 18px;font-size:26px}
+.close{position:absolute;right:14px;top:12px;background:none;border:0;color:#8ca9b4;font-size:28px;cursor:pointer}
+.guide-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.guide-grid>div{border:1px solid #193743;border-radius:12px;padding:13px;background:#071018}
+.guide-grid h3{margin:0 0 6px;font-size:14px}
+.guide-grid p{margin:0;color:#8ca6af;font-size:13px;line-height:1.5}
+.primary{width:100%;margin-top:16px;background:#0e6957;border-color:#35c9a5;font-size:15px}
+@media(max-width:900px){
+ .hud{grid-template-columns:repeat(4,1fr)}
+ .state{grid-column:span 2}
+ .touch-controls{display:flex}
+}
+@media(max-width:620px){
+ .game-shell{padding:9px}
+ .topbar{align-items:flex-start;flex-direction:column}
+ .actions{width:100%;justify-content:flex-start}
+ .btn{padding:8px 9px;font-size:11px}
+ .hud{grid-template-columns:repeat(3,1fr)}
+ .state{grid-column:span 3}
+ .bars{grid-template-columns:1fr}
+ footer{flex-direction:column}
+ .guide-grid{grid-template-columns:1fr}
+ .brand{font-size:18px}
+}
