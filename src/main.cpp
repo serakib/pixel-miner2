@@ -22,6 +22,7 @@ static constexpr int TILE = 24;
 
 static constexpr int START_HP = 100;
 static constexpr int START_ENERGY = 100;
+static constexpr int ENERGY_REGEN_PER_SECOND = 5;
 static constexpr int MAX_BUGS = 8;
 
 static constexpr double MOVE_COOLDOWN = 0.12;
@@ -80,6 +81,7 @@ static bool paused = false;
 
 static double lastMoveTime = 0.0;
 static double lastBugSpawn = 0.0;
+static double lastEnergyRegen = 0.0;
 
 static mt19937 rng(
     static_cast<unsigned int>(time(nullptr))
@@ -1408,27 +1410,14 @@ static void tryMove(
     int dy
 ) {
 
-    if (
-        gameOver ||
-        paused
-    ) {
-        return;
-    }
-
-    if (
-        player.energy <= 0
-    ) {
-
-        player.energy = 0;
-
-        gameOver = true;
-
-        js_message(
-            "OUT OF ENERGY"
+   T OF ENERGY"
         );
-
-        return;
-    }
+if (
+    player.energy <= 0
+) {
+    player.energy = 0;
+    return;
+}
 
     const int nextX =
         player.x + dx;
@@ -2021,6 +2010,10 @@ void restart_game() {
 
     lastMoveTime = 0.0;
     lastBugSpawn = 0.0;
+if (
+    !gameOver &&
+    !paused
+) {
 
     generateWorld();
 
@@ -2084,6 +2077,17 @@ static void gameLoop(
         ) {
 
             handleKeyboard();
+if (
+    player.energy < START_ENERGY &&
+    currentTime - lastEnergyRegen >= 1.0
+) {
+    player.energy = min(
+        START_ENERGY,
+        player.energy + ENERGY_REGEN_PER_SECOND
+    );
+
+    lastEnergyRegen = currentTime;
+}
 
             handleMouse();
 
